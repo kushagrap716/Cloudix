@@ -38,18 +38,6 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 - Express + TypeScript backend.
 - React + Vite frontend.
 
-## Preview
-
-Live preview: https://9drive.zenhosta.com
-
-![Cloudix dashboard preview](https://i.ibb.co.com/HLjG3JRf/image.png)
-
-![Cloudix shared file preview](https://i.ibb.co.com/QLpYGmx/image.png)
-
-## Star History
-
-[![Star History Chart](https://star-history.dera.page/svg?repos=zenhosta/9drive&type=Date)](https://star-history.dera.page/#zenhosta/9drive&type=Date)
-
 ## Project Structure
 
 ```txt
