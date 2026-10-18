@@ -2,731 +2,384 @@
 
 # Cloudix
 
-Cloudix is a storage gateway web app for connecting multiple Google Drive accounts into one virtual storage dashboard. There is no login: the app opens straight to the dashboard and runs as one built-in local user. Connect your Google Drive accounts from Settings, track quota, upload files into a dedicated `cloudix` Drive folder, organize files with virtual folders, preview files, sync MySQL from Google Drive, and let the backend route uploads to the Drive account with enough free space.
+Cloudix is a storage gateway web and desktop application for uniting multiple Google Drive and S3-compatible storage accounts into one seamless virtual storage dashboard.
 
+There is no multi-user registration or login screen: Cloudix is built for personal, homelab, and self-hosted use, opening directly to your storage dashboard as a single built-in local user. Connect your Google Drive accounts from Settings, track combined quotas, upload files into a dedicated `cloudix` folder, organize files with virtual folders, preview/stream files, sync MySQL from Google Drive, and let the backend automatically route uploads to connected drives with sufficient free space.
+
+---
+
+> [!CAUTION]
+> **CRITICAL SECURITY NOTICE FOR SERVER / VPS DEPLOYMENTS**
+> Cloudix runs as a single built-in user and has **no login screen**. Anyone who can reach the web interface has full control over all files and connected Google Drive / S3 storage accounts.
+>
+> **NEVER expose ports `5173` or `4000` directly to the public internet.**
+> When deploying on a VPS or remote server, you **MUST** put Cloudix behind:
+> - **A reverse proxy with HTTP Basic Auth** (Nginx / Caddy with `htpasswd`), or
+> - **A private mesh VPN** (e.g., [Tailscale](https://tailscale.com) or WireGuard), or
+> - **Zero Trust Tunnel / Cloudflare Access** with email/OAuth protection, or
+> - **An SSH Tunnel** (`ssh -N -L 5173:127.0.0.1:5173 -L 4000:127.0.0.1:4000 user@your-vps`).
+
+---
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
 ## Features
 
-- Google Drive and S3-compatible storage gateway in one virtual storage dashboard.
-- S3-compatible storage support with custom endpoints for providers like MinIO, Cloudflare R2, Wasabi, Backblaze B2, and AWS S3.
-- Direct upload stream to Google Drive. Files are not stored on the server.
-- Google Drive uploads are stored under a root `cloudix` folder.
-- Direct upload stream to S3-compatible storage through the backend without exposing storage credentials to the frontend.
-- Upload routing policies with most-available, round-robin, and priority-order modes.
-- External upload API using API keys at `POST /api/v1/uploads`.
-- API key management with one-time secret display, hashed key storage, last-used tracking, and revocation.
-- No login screen: single built-in local user (the desktop app opens straight to the dashboard).
-- Starred files: right-click a file and choose Add Star; see them under Starred.
-- Backup and restore of the database from Settings (uses the bundled MariaDB tools in the desktop app).
-- Multi-account storage quota summary.
-- Quota tracker page.
-- Manual sync from the Google Drive `cloudix` folder back into MySQL.
-- Virtual folders.
-- File preview, download, rename, move, and delete actions.
-- In-app API documentation with cURL and JavaScript upload examples.
-- Bottom-right upload progress panel.
-- Bearer token authentication.
-- Global Google OAuth config stored encrypted in DB (can be set via seed command or directly in Settings UI).
-- Automated system updates via `update.sh` directly from the Settings UI (PM2 setup).
-- Optional reCAPTCHA on email/password registration.
-- MySQL database with Prisma migrations.
-- Express + TypeScript backend.
-- React + Vite frontend.
+- **Multi-Account Storage Gateway**: Connect multiple Google Drive and S3-compatible accounts into one virtual drive.
+- **S3-Compatible Storage Support**: Custom endpoints for MinIO, Cloudflare R2, Wasabi, Backblaze B2, and AWS S3.
+- **Direct Upload Streaming**: Files stream directly through the backend into storage—never saved to server disk.
+- **Dedicated Folder Structure**: Google Drive uploads are saved under a dedicated root `cloudix` folder.
+- **Large File Splitting**: Files that exceed the remaining capacity of a single drive are automatically split across multiple connected drives and stitched seamlessly upon download or preview.
+- **Upload Routing Policies**: Configurable routing modes (`most-available`, `round-robin`, and `priority-order`).
+- **External Upload API**: Upload files programmatically via `POST /api/v1/uploads` using hashed API keys.
+- **Zero Login Friction**: Designed for personal use—opens straight to your dashboard.
+- **Starred Files & Organization**: Favorite files, organize with virtual folders, rename, move, and batch delete.
+- **Database Backup & Restore**: Download database backups or restore directly from the Settings UI.
+- **Quota Tracking & Auto-Sync**: View total, used, and available space across all accounts and sync changes from Google Drive.
+- **Desktop Application**: Includes an Electron-based desktop app bundling MariaDB for true zero-install local usage.
+- **Automated Updates**: Trigger background updates via `update.sh` with live logs in the Settings UI.
 
+---
 ## Project Structure
 
 ```txt
-backend/   Express API, Prisma schema, Google Drive integration
-frontend/  Vite React app
+backend/   Express API, Prisma ORM, Google Drive & S3 streaming, upload engine
+frontend/  React + Vite dashboard UI
+desktop/   Electron desktop app bundling local database runner
 ```
 
 ## Requirements
 
-- Node.js 20+
-- npm
-- MySQL running locally
-- Google Cloud project
-- Google OAuth Client ID and Client Secret
+- **Node.js**: 20+
+- **npm**
+- **MySQL / MariaDB**: MySQL 8+ or MariaDB 10.5+ running locally (or via Docker)
+- **Google Cloud Project**: With Google Drive API enabled and OAuth Client ID/Secret
 
-Default database used by this project:
+> [!WARNING]
+> **Database Security Warning**: The default database configuration (`localhost:3306`, user: `root`, empty password) is intended strictly for rapid local development. Never expose a database with empty or root credentials on a production server. Always configure a dedicated database user with a strong password.
 
-```txt
-host: localhost
-port: 3306
-database: cloudix
-user: root
-password: empty
-```
+---
 
 ## 1. Quick Setup & Installation (Recommended)
 
-The easiest way to prepare the project is using the automated setup script. It generates local environment files with secure keys, installs dependencies, and generates the Prisma client. MySQL 8+ must already be running for local development; Docker setup includes MySQL.
+The easiest way to set up Cloudix locally is using the automated setup script. It generates `.env` files with secure cryptographic secrets, installs all dependencies, and prepares Prisma:
 
 ### Windows (PowerShell)
-Make sure to open PowerShell and navigate to the project directory first. For example, if you cloned the project to `E:\AUTO KLIK\Cloudix`:
-
 ```powershell
-# 1. Switch to the drive where the project is located (if necessary)
-E:
-
-# 2. Navigate to the project folder
-cd "E:\AUTO KLIK\Cloudix"
-
-# 3. Run the automated setup script
+cd Cloudix
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-### Linux/macOS
-
+### Linux / macOS
 ```bash
+cd Cloudix
 bash ./setup.sh
 ```
 
-Enter your MySQL connection URL when prompted. Google Client ID/Secret can be skipped and configured later.
+Follow the prompts to enter your MySQL connection URL.
 
-Once setup is complete, apply migrations and start backend and frontend in separate terminals:
+Once complete, start the backend and frontend in separate terminals:
 
 ```bash
+# Terminal 1 - Backend
 cd backend
 npm run prisma:migrate
 npm run dev
-```
 
-```bash
+# Terminal 2 - Frontend
 cd frontend
 npm run dev
 ```
+
+Open `http://localhost:5173` in your browser.
 
 ---
 
 ## 2. Manual Installation (Alternative)
 
-If you prefer to configure the project manually:
+If you prefer to configure the project step-by-step:
 
 ### 2.1 Install Dependencies
-Install backend dependencies:
-
 ```bash
+# Install backend dependencies
 cd backend
 npm install
-```
 
-Install frontend dependencies:
-
-```bash
+# Install frontend dependencies
 cd ../frontend
 npm install
 ```
 
-### 2.2 Create Database (For MySQL)
-Create a database:
-```sql
-CREATE DATABASE cloudix;
-```
-If using MySQL CLI:
+### 2.2 Create Database
 ```bash
-mysql -u root -e "CREATE DATABASE IF NOT EXISTS cloudix;"
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS cloudix;"
 ```
 
-### 2.3 Environment Setup
-
-
-Create `backend/.env`:
+### 2.3 Backend Environment Setup
+Create `backend/.env` (or copy from `backend/.env.example`):
 
 ```env
-DATABASE_URL="mysql://root@localhost:3306/cloudix"
+DATABASE_URL="mysql://root:yourpassword@localhost:3306/cloudix"
 APP_PORT=4000
 FRONTEND_URL="http://localhost:5173"
-JWT_ACCESS_SECRET="change-this-jwt-secret-at-least-32-chars"
-TOKEN_ENCRYPTION_KEY="change-this-encryption-key-32bytes!"
+JWT_ACCESS_SECRET="generate-a-random-secret-at-least-32-chars-long"
+TOKEN_ENCRYPTION_KEY="generate-a-random-secret-at-least-32-chars-long"
 ACCESS_TOKEN_TTL_SECONDS=900
 REFRESH_TOKEN_TTL_DAYS=30
 MAX_UPLOAD_BYTES=5368709120
-RECAPTCHA_SECRET_KEY=""
 
-# Used only by `npm run seed:google-config`.
-# These values are encrypted and stored in DB as global Google OAuth config.
+# Optional Google OAuth config (can also be entered via Settings in UI)
 GOOGLE_CLIENT_ID=""
 GOOGLE_CLIENT_SECRET=""
 GOOGLE_REDIRECT_URI="http://localhost:4000/connected-accounts/google/callback"
 ```
 
-Important:
-
-- `JWT_ACCESS_SECRET` should be long and random.
-- `TOKEN_ENCRYPTION_KEY` should be long and random.
-- Do not commit `backend/.env`.
-- Google OAuth credentials are used by the seed script, then stored encrypted in the database.
-
-## 4. Frontend Environment
-
-Create or confirm `frontend/.env`:
+### 2.4 Frontend Environment Setup
+Create `frontend/.env` (or copy from `frontend/.env.example`):
 
 ```env
 VITE_API_URL=http://localhost:4000
-VITE_RECAPTCHA_SITE_KEY=
 ```
 
-Captcha is disabled when `VITE_RECAPTCHA_SITE_KEY` or backend `RECAPTCHA_SECRET_KEY` is empty. Set both values to enable captcha on registration.
+---
 
-## 5. Run Prisma Migrations
+## 3. Run Prisma Migrations
+
+Apply the database schema:
 
 ```bash
 cd backend
 npm run prisma:migrate
 ```
 
-If Prisma client generation is blocked on Windows by a running Node process, stop running backend/frontend dev servers and run:
+---
+
+## 4. Google Cloud Setup
+
+OAuth and Drive APIs are managed in the [Google Cloud Console](https://console.cloud.google.com/).
+
+### 4.1 Enable Google Drive API
+1. Navigate to **APIs & Services** -> **Library**.
+2. Search for **Google Drive API** and click **Enable**.
+
+### 4.2 Configure OAuth Consent Screen
+1. Go to **APIs & Services** -> **OAuth consent screen**.
+2. Choose **External** user type.
+3. Fill in required App name and email fields.
+4. Add the following scopes:
+   - `https://www.googleapis.com/auth/drive`
+   - `https://www.googleapis.com/auth/userinfo.email`
+   - `https://www.googleapis.com/auth/userinfo.profile`
+5. If the app publishing status is **Testing**, add your Google account under **Test users**.
+
+### 4.3 Create OAuth Client ID
+1. Go to **APIs & Services** -> **Credentials** -> **Create Credentials** -> **OAuth client ID**.
+2. Application type: **Web application**.
+3. **Authorized JavaScript origins**:
+   - `http://localhost:5173` (for local dev) or `https://your-domain.com` (production)
+4. **Authorized redirect URIs**:
+   - `http://localhost:4000/connected-accounts/google/callback` (for local dev) or `https://api.your-domain.com/connected-accounts/google/callback` (production)
+5. Copy your **Client ID** and **Client Secret**.
+
+### 4.4 Save Credentials
+You can either run `npm run seed:google-config` in `backend/` or enter them directly in the Cloudix web interface under **Settings -> Google Credentials**.
+
+---
+
+## 5. Docker Deployment
+
+Cloudix includes Docker configuration for running MySQL, Backend, and Frontend together:
 
 ```bash
-npx prisma generate
-```
-
-## 6. Google Cloud Setup
-
-Google setup is done in Google Cloud Console, not Google Search Console. Google Search Console is for website indexing/search ownership. OAuth and Drive API are managed in Google Cloud Console.
-
-Open Google Cloud Console:
-
-```txt
-https://console.cloud.google.com/
-```
-
-### 6.1 Create Or Select Project
-
-1. Open Google Cloud Console.
-2. Click project selector in top bar.
-3. Create a new project or select an existing project.
-4. Remember the project name because OAuth client and Drive API must be in the same project.
-
-### 6.2 Enable Google Drive API
-
-1. Go to:
-
-```txt
-APIs & Services -> Library
-```
-
-2. Search:
-
-```txt
-Google Drive API
-```
-
-3. Open `Google Drive API`.
-4. Click `Enable`.
-5. Wait a few minutes if Google says the API was enabled recently.
-
-Direct URL pattern:
-
-```txt
-https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=YOUR_PROJECT_ID
-```
-
-If Google Drive API is disabled, you will see an error like:
-
-```txt
-Google Drive API has not been used in project ... before or it is disabled.
-```
-
-### 6.3 Configure OAuth Consent Screen
-
-1. Go to:
-
-```txt
-APIs & Services -> OAuth consent screen
-```
-
-2. Choose app type:
-
-```txt
-External
-```
-
-3. Fill required fields:
-
-```txt
-App name
-User support email
-Developer contact email
-```
-
-4. Add scopes:
-
-```txt
-https://www.googleapis.com/auth/drive
-https://www.googleapis.com/auth/userinfo.email
-https://www.googleapis.com/auth/userinfo.profile
-```
-
-Full Drive access is required so Google sign-in can connect the first Drive account automatically and sync files manually added to the `cloudix` folder.
-
-5. If publishing status is `Testing`, add test users.
-
-Add every Google account that will test the app:
-
-```txt
-OAuth consent screen -> Test users -> Add users
-```
-
-If you do not add test users, Google may show:
-
-```txt
-Access blocked: app has not completed the Google verification process
-Error 403: access_denied
-```
-
-### 6.4 Create OAuth Client
-
-1. Go to:
-
-```txt
-APIs & Services -> Credentials
-```
-
-2. Click:
-
-```txt
-Create Credentials -> OAuth client ID
-```
-
-3. Application type:
-
-```txt
-Web application
-```
-
-4. Add authorized JavaScript origin:
-
-```txt
-http://localhost:5173
-```
-
-5. Add authorized redirect URI:
-
-```txt
-http://localhost:4000/connected-accounts/google/callback
-```
-
-6. Click Create.
-7. Copy:
-
-```txt
-Client ID
-Client Secret
-```
-
-### 6.5 Seed Google OAuth Config
-
-Put values into `backend/.env`:
-
-```env
-GOOGLE_CLIENT_ID="your-client-id"
-GOOGLE_CLIENT_SECRET="your-client-secret"
-GOOGLE_REDIRECT_URI="http://localhost:4000/connected-accounts/google/callback"
-```
-
-Then run:
-
-```bash
-cd backend
-npm run seed:google-config
-```
-
-This stores the Google OAuth config as a global encrypted provider config in MySQL. Google sign-in uses the same config and automatically connects the first Drive account. Logged-in users can still click `Connect Drive` in Settings to add more Drive accounts.
-
-## 7. Run Development Servers
-
-Start backend:
-
-```bash
-cd backend
-npm run dev
-```
-
-Backend runs at:
-
-```txt
-http://localhost:4000
-```
-
-Start frontend:
-
-```bash
-cd frontend
-npm run dev
-```
-
-Frontend runs at:
-
-```txt
-http://localhost:5173
-```
-
-## Docker Deployment
-
-This repository includes Docker files for running MySQL, backend, and frontend together.
-
-Files:
-
-```txt
-docker-compose.yml
-.env.docker.example
-backend/Dockerfile
-frontend/Dockerfile
-frontend/nginx.conf
-```
-
-### 1. Prepare Docker Env
-
-Copy the example env file:
-
-```bash
+# 1. Copy the docker environment template
 cp .env.docker.example .env
-```
 
-On Windows PowerShell:
+# 2. Edit .env with your secrets and domain
 
-```powershell
-Copy-Item .env.docker.example .env
-```
-
-Edit `.env`:
-
-```env
-MYSQL_ROOT_PASSWORD=root
-MYSQL_DATABASE=cloudix
-
-FRONTEND_URL=http://localhost:5173
-VITE_API_URL=http://localhost:4000
-VITE_RECAPTCHA_SITE_KEY=
-
-JWT_ACCESS_SECRET=replace-with-long-random-secret
-TOKEN_ENCRYPTION_KEY=replace-with-long-random-secret
-RECAPTCHA_SECRET_KEY=
-
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_REDIRECT_URI=http://localhost:4000/connected-accounts/google/callback
-```
-
-Captcha is disabled when either `VITE_RECAPTCHA_SITE_KEY` or `RECAPTCHA_SECRET_KEY` is empty.
-
-### 2. Start Containers
-
-```bash
+# 3. Build and launch containers
 docker compose up -d --build
 ```
 
-Services:
+Container endpoints:
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:4000`
+- MySQL: `localhost:3306`
 
-```txt
-frontend: http://localhost:5173
-backend:  http://localhost:4000
-mysql:    localhost:3306
-```
-
-The backend container runs Prisma migrations automatically on startup:
-
-```txt
-npm run db:migrate:deploy
-```
-
-This applies pending migrations such as S3 storage support before the API starts, so deployments from an older database can update safely without dropping data.
-
-It also seeds the global Google OAuth config automatically when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set to real values in `.env`. If those values are blank or still placeholders, the backend still starts and logs a warning. Google connect/sign-in will be unavailable until you set real Google OAuth credentials and restart the stack:
-
+To view logs:
 ```bash
-docker compose up -d --build
+docker compose logs -f
 ```
 
-### 3. Seed Google OAuth Config Manually
-
-Automatic Docker startup seeding is usually enough. If you update Google OAuth values while containers are already running, seed the global Google OAuth config manually:
-
-```bash
-docker compose exec backend npm run seed:google-config
-```
-
-This stores `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` from Docker env into MySQL as encrypted global config.
-
-### 4. View Logs
-
-```bash
-docker compose logs -f backend
-docker compose logs -f frontend
-docker compose logs -f mysql
-```
-
-### 5. Stop Containers
-
+To stop:
 ```bash
 docker compose down
 ```
 
-Remove database volume too:
+---
 
+## 6. VPS Deployment & Security Guide
+
+### Secure Setup Checklist for Remote Servers
+
+1. **Do not bind ports 5173 or 4000 to `0.0.0.0`**. In your `docker-compose.yml`, bind ports to localhost only (`127.0.0.1:5173:80` and `127.0.0.1:4000:4000`).
+2. **Put Cloudix behind Nginx / Caddy with HTTP Basic Authentication** and SSL.
+
+#### Example Secure Nginx Configuration
+
+Install `apache2-utils` to generate a password:
 ```bash
-docker compose down -v
+sudo apt install apache2-utils -y
+sudo htpasswd -c /etc/nginx/.htpasswd yourusername
 ```
 
-### Docker Production Notes
+Create `/etc/nginx/sites-available/cloudix`:
+```nginx
+server {
+    listen 80;
+    server_name cloudix.yourdomain.com;
+    return 301 https://$host$request_uri;
+}
 
-- Replace localhost URLs with production domain.
-- Update Google OAuth authorized JavaScript origin.
-- Update Google OAuth redirect URI.
-- Use strong `JWT_ACCESS_SECRET` and `TOKEN_ENCRYPTION_KEY`.
-- Do not expose MySQL port publicly in production.
-- Put frontend/backend behind HTTPS reverse proxy.
-- Rebuild frontend when `VITE_API_URL` changes because Vite embeds env at build time.
-- Rebuild frontend when `VITE_RECAPTCHA_SITE_KEY` changes because Vite embeds env at build time.
+server {
+    listen 443 ssl http2;
+    server_name cloudix.yourdomain.com;
 
-### VPS Deployment (Step-by-Step)
+    ssl_certificate /etc/letsencrypt/live/cloudix.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cloudix.yourdomain.com/privkey.pem;
 
-Follow these steps to deploy Cloudix to a VPS (such as Ubuntu/Debian) using Docker:
+    # Require username and password to access Cloudix
+    auth_basic "Cloudix Storage Access";
+    auth_basic_user_file /etc/nginx/.htpasswd;
 
-#### 1. Install Docker & Docker Compose on your VPS
-```bash
-sudo apt update
-sudo apt install -y docker.io docker-compose
-sudo systemctl enable --now docker
+    # Frontend
+    location / {
+        proxy_pass http://127.0.0.1:5173;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Backend API & Uploads
+    location /api/ {
+        proxy_pass http://127.0.0.1:4000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        client_max_body_size 50G;
+    }
+}
 ```
 
-#### 2. Clone the Repository
+#### Step-by-Step Server Setup
 ```bash
-git clone https://github.com/your-github-username/cloudix.git
-cd cloudix
-```
+# 1. Clone repository
+git clone https://github.com/kushagrap716/Cloudix.git
+cd Cloudix
 
-#### 3. Setup the Production Environment
-Copy the example environment file to `.env`:
-```bash
+# 2. Configure .env with your domain and strong credentials
 cp .env.docker.example .env
-```
-Edit the `.env` file (e.g., `nano .env`) and configure the values for your production VPS domain/IP:
-* **`FRONTEND_URL`**: Set to your public domain or VPS IP (e.g., `http://103.xxx.xxx.xxx:5173` or `https://cloudix.yourdomain.com`).
-* **`VITE_API_URL`**: Set to your public backend URL (e.g., `http://103.xxx.xxx.xxx:4000` or `https://api.cloudix.yourdomain.com`).
-* **`GOOGLE_REDIRECT_URI`**: Set to your public redirect callback URL (e.g., `http://103.xxx.xxx.xxx:4000/connected-accounts/google/callback`).
-* Set secure credentials for **`JWT_ACCESS_SECRET`** and **`TOKEN_ENCRYPTION_KEY`** (encryption key must be exactly 32 characters/bytes).
-* Add your **`GOOGLE_CLIENT_ID`** and **`GOOGLE_CLIENT_SECRET`**.
+nano .env
 
-#### 4. Deploy the Containers
-Run Docker Compose to build and start the database, backend, and frontend containers in the background:
-```bash
+# 3. Start containers
 docker compose up -d --build
 ```
 
-#### 5. Seed the Google Configuration
-Initialize the encrypted Google configuration in the database:
-```bash
-docker compose exec backend npm run seed:google-config
-```
+---
 
-#### 6. Add Authorized URIs in Google Cloud Console
-1. Go to **APIs & Services** -> **Credentials** in the Google Cloud Console.
-2. Edit your OAuth 2.0 Web Client.
-3. In **Authorized JavaScript origins**, add your frontend URL (e.g., `http://your-vps-ip:5173` or `https://cloudix.yourdomain.com`).
-4. In **Authorized redirect URIs**, add your redirect URI (e.g., `http://your-vps-ip:4000/connected-accounts/google/callback` or `https://api.cloudix.yourdomain.com/connected-accounts/google/callback`).
-5. Save changes.
+## 7. Windows Desktop Application
 
-### Non-Docker Production Startup
+Cloudix includes an Electron desktop app with an embedded, isolated MariaDB database. It requires no installation of MySQL or Node.js on end-user machines.
 
-Run production migrations before starting the backend:
+- **To run in development:**
+  ```powershell
+  cd desktop
+  npm install
+  npm start
+  ```
+- **To build installer & portable `.exe`:**
+  Double-click `build-windows-exe.bat` from the root folder. Output executables are created in `desktop/release/`.
 
-```bash
-cd backend
-npm run db:migrate:deploy
-npm run start
-```
+---
 
-Or use the combined command:
+## 8. API Overview
 
-```bash
-cd backend
-npm run start:deploy
-```
+All routes run as the built-in local user (`requireAuth`).
 
-`npm run db:migrate:deploy` uses Prisma production migrations and does not reset the database. If Prisma reports migration drift, stop the deploy and repair migration history first; do not run `prisma migrate reset` on production.
-
-## 8. Manual Test Flow
-
-1. Open frontend:
-
+### Auth
 ```txt
-http://localhost:5173
+GET /auth/me       (Returns current local user session)
 ```
 
-2. The app opens straight to the dashboard (there is no register or login step).
-3. Open `Settings`, save your Google OAuth credentials, click `Connect Drive`, approve access (tick the Drive permission), and confirm the account appears.
-5. Open `Quota Tracker`.
-6. Confirm quota appears.
-7. Open `All Files`.
-8. Create nested virtual folders.
-9. Upload a file and confirm it appears under Google Drive root folder `cloudix`.
-10. Add or remove a file manually inside Google Drive folder `cloudix`, then click `Sync Drive` in All Files.
-11. Watch bottom-right upload progress.
-12. Right-click file row for actions:
-
+### Storage Accounts & Quota
 ```txt
-View
-Download
-Rename
-Move to Folder
-Delete
+GET /storage/summary                       (Combined quota metrics)
+GET /connected-accounts                    (List connected Drive / S3 accounts)
+GET /connected-accounts/google/connect-url (Initiate Google OAuth)
+GET /connected-accounts/google/callback    (OAuth callback handler)
+POST /connected-accounts/:id/sync-quota    (Force quota recalculation)
+DELETE /connected-accounts/:id             (Disconnect account)
 ```
 
-## API Overview
-
-Auth:
-
+### Virtual Folders
 ```txt
-GET /auth/me
-POST /auth/refresh
-POST /auth/logout
-GET /auth/me
-```
-
-Google accounts:
-
-```txt
-GET /connected-accounts/google/connect-url
-GET /connected-accounts/google/callback
-GET /connected-accounts
-POST /connected-accounts/:id/sync-quota
-DELETE /connected-accounts/:id
-```
-
-Storage:
-
-```txt
-GET /storage/summary
-```
-
-Folders:
-
-```txt
-GET /folders
+GET /folders               (List virtual folders)
 GET /folders/recent?limit=4
-POST /folders
-DELETE /folders/:id
+POST /folders              (Create virtual folder)
+PATCH /folders/:id         (Rename / move folder)
+DELETE /folders/:id        (Delete folder)
 ```
 
-Files:
-
+### Files
 ```txt
-GET /files
+GET /files                 (List files with filtering/sorting)
 GET /files?folderId=<id>
 GET /files?q=<search>
-GET /files/shared-links
-GET /files/:id
-PATCH /files/:id
-PATCH /files/batch
-DELETE /files/batch
-POST /files/sync-google
-POST /files/:id/share
-DELETE /files/:id/share
-POST /files/:id/preview-token
-GET /files/:id/view-url
-GET /files/:id/download
-DELETE /files/:id
-GET /files/preview/:token
+GET /files/:id             (Get file metadata)
+PATCH /files/:id           (Rename / move)
+PATCH /files/batch         (Batch move/favorite)
+DELETE /files/:id          (Delete file and its storage chunks)
+DELETE /files/batch        (Batch delete)
+POST /files/sync-google    (Sync missing files from Drive cloudix folder)
+POST /files/:id/share      (Create public share link)
+DELETE /files/:id/share    (Revoke public share link)
+GET /files/:id/download    (Stream file download)
+GET /files/:id/view-url    (Get temporary streaming URL)
 ```
 
-Uploads:
-
+### Uploads
 ```txt
-POST /uploads
+POST /uploads              (Multipart stream upload to connected storage)
+POST /api/v1/uploads       (External API upload using API Key header 'x-api-key')
 ```
 
-Upload is `multipart/form-data`. Metadata fields should be appended before the file:
+---
 
-```txt
-sizeBytes
-fileName
-mimeType
-folderId optional
-file
-```
+## 9. Automated Updates (`update.sh`)
 
-## Security Notes
+Cloudix includes an automated update script [`update.sh`](update.sh). You can trigger updates directly from the **Settings** page in the UI, or run it manually:
 
-- Backend never stores uploaded files on disk.
-- Uploads are streamed through the backend to Google Drive folder `cloudix`.
-- Google tokens are encrypted in MySQL.
-- Refresh tokens for app sessions are hashed in MySQL.
-- Google auth handoff tokens, public share tokens, and preview tokens are hashed before lookup/use.
-- `backend/.env` is ignored by git.
-- Do not expose `TOKEN_ENCRYPTION_KEY`, `JWT_ACCESS_SECRET`, `RECAPTCHA_SECRET_KEY`, OAuth client secrets, or raw share/preview/handoff tokens.
-
-## Production Notes
-
-- Replace localhost redirect URIs with production URLs.
-- Add production domain to Google OAuth authorized origins.
-- Set OAuth consent screen to production when ready.
-- Google may require verification for public apps.
-- Use strong secrets.
-- Put the backend behind HTTPS.
-- Consider secure cookies or stronger token storage for production.
-
-## Google OAuth Configuration via UI
-
-Instead of seeding Google credentials manually using `npm run seed:google-config`, you can set them up directly from the frontend dashboard:
-1. Open the dashboard.
-2. Go to **Settings** -> **Google Credentials**.
-3. Input your **Google Client ID**, **Google Client Secret**, and **Redirect URI** (e.g. `https://103.65.237.136.nip.io:4000/connected-accounts/google/callback`).
-4. Click **Save Configuration**.
-
-The config is automatically encrypted and saved into the database, enabling Google sign-in and Google Drive connections instantly.
-
-## Automated Updates & PM2 Management
-
-For native VPS setups running with PM2, Cloudix includes a fully automated system update trigger and log monitor in the **Settings** UI.
-
-### How it works
-1. When you trigger an update from the frontend dashboard, the backend triggers the `update.sh` script in the background.
-2. The script:
-   - Resets any local Git conflicts (`git reset --hard`) and pulls the latest changes.
-   - Installs dependencies and builds both backend and frontend.
-   - Deploys Prisma database migrations.
-   - Restarts the backend process using PM2 (`pm2 restart cloudix-backend`).
-3. You can monitor the real-time rebuild progress using the log viewer inside the Settings UI.
-
-### Manual update command
-If you want to update manually via the terminal, run:
 ```bash
+chmod +x update.sh
 ./update.sh
 ```
-Or run the commands individually:
-```bash
-git reset --hard
-git pull origin main
-cd backend && npm install && npx prisma generate && npm run build && npx prisma migrate deploy
-cd ../frontend && npm install && npm run build
-pm2 restart cloudix-backend
-```
 
-## Build
+The script:
+1. Resets uncommitted file modifications (`git reset --hard origin/main`).
+2. Pulls the latest commits from GitHub.
+3. Installs dependencies and recompiles the backend and frontend.
+4. Executes any pending Prisma database migrations.
+5. Restarts PM2 (`cloudix-backend`) or Docker containers.
 
-Backend:
+---
 
-```bash
-cd backend
-npm run build
-```
+## 10. Large File Splitting (Multi-Drive Storage)
 
-Frontend:
-
-```bash
-cd frontend
-npm run build
-```
-
-## Files larger than one drive (split storage)
-
-If a file does not fit on any single connected Google Drive, Cloudix cuts it into parts and stores each part on a different drive
-(in a `cloudix/cloudix-parts` folder). Downloading, previews, sharing and zip downloads stitch the parts back together in order and
-verify each part's checksum; a damaged or missing part makes the download fail visibly instead of delivering a bad file.
-Deleting the file removes all parts. Notes:
-- Needs enough total free space across your connected Google Drives (each drive keeps a small safety margin).
-- Files in a folder that is pinned to one drive are not split.
-- Don't delete or rename the `cloudix-parts` folder or its files inside Google Drive.
-- Run the tests with `cd backend && npm run test:split`.
+If a file exceeds the available free space on a single connected Google Drive account:
+1. Cloudix automatically cuts the file into chunked parts during upload.
+2. Parts are distributed across distinct connected Drive accounts in a `cloudix/cloudix-parts` folder.
+3. When previewing or downloading, Cloudix streams and stitches the parts back together sequentially with checksum validation.
+4. Deleting a split file cleans up all parts across all corresponding Google Drives.
