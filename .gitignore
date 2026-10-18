@@ -1,0 +1,27 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Secrets
+.env
+backend/.env
+backend/.env.local
+backend/.env.*.local
+
+# Databases
+*.db
+*.db-journal
+
+# Desktop build artifacts & vendored dependencies
+desktop/node_modules/
+desktop/app-dist/
+desktop/backend-dist/
+desktop/vendor/
+desktop/release/
+release/
+
+# Local env is non-secret by default, keep example in repo instead.
+frontend/.env.local
+frontend/.env.*.local
+

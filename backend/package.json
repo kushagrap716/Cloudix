@@ -1,0 +1,51 @@
+{
+  "name": "backend",
+  "version": "1.0.1",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "start:deploy": "npm run db:migrate:deploy && node dist/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:sqlite": "tsx src/scripts/setup-sqlite.ts",
+    "db:mysql": "tsx src/scripts/setup-mysql.ts",
+    "seed:google-config": "tsx src/scripts/seed-google-config.ts",
+    "seed:google-config:docker": "tsx src/scripts/seed-google-config-if-present.ts",
+    "test:s3": "tsx src/scripts/test-s3-connection.ts",
+    "test:api-upload": "tsx src/scripts/test-api-upload.ts",
+    "test:split": "tsx test/split.test.ts && tsx test/upload-engine.test.ts && node --experimental-test-module-mocks --import tsx test/split-integration.test.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.954.0",
+    "@aws-sdk/lib-storage": "^3.954.0",
+    "@prisma/client": "^6.19.3",
+    "archiver": "^8.0.0",
+    "argon2": "^0.44.0",
+    "busboy": "^1.6.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "googleapis": "^173.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "prisma": "^6.19.3",
+    "undici": "^7.27.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/archiver": "^8.0.0",
+    "@types/busboy": "^1.5.4",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^25.9.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

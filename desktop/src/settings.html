@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'" />
+    <title>Cloudix Server Settings</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 26px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f8fafc; color: #0f172a; }
+      h1 { margin: 0 0 6px; font-size: 20px; }
+      p { margin: 0 0 14px; font-size: 13px; line-height: 1.5; color: #64748b; }
+      label.field { display: block; margin: 12px 0 6px; font-size: 13px; font-weight: 600; }
+      input[type=text] { width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; color: inherit; }
+      input[type=text]:focus { outline: 2px solid #2563eb; outline-offset: 1px; border-color: #2563eb; }
+      .modes { display: grid; gap: 8px; margin-bottom: 4px; }
+      .mode { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; cursor: pointer; font-size: 13px; }
+      .mode b { display: block; font-size: 14px; }
+      .mode span { color: #64748b; }
+      .hint { margin-top: 6px; font-size: 12px; color: #64748b; }
+      .box { margin-top: 14px; padding: 10px 12px; border: 1px solid #dbeafe; background: #eff6ff; border-radius: 10px; font-size: 12.5px; line-height: 1.55; color: #1e3a8a; }
+      code { font-family: ui-monospace, Consolas, monospace; background: #fff; padding: 1px 5px; border-radius: 5px; border: 1px solid #bfdbfe; user-select: all; }
+      .error { margin-top: 10px; min-height: 18px; font-size: 13px; color: #dc2626; }
+      .row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+      button { padding: 9px 18px; font-size: 14px; font-weight: 600; border-radius: 10px; border: 1px solid #cbd5e1; background: #fff; color: #0f172a; cursor: pointer; }
+      button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Server settings</h1>
+    <p>Choose how Cloudix gets its server.</p>
+
+    <div class="modes">
+      <label class="mode" id="builtinChoice">
+        <input type="radio" name="mode" value="builtin" />
+        <div><b>Built-in server</b><span>Cloudix runs its own server inside this app.</span></div>
+      </label>
+      <label class="mode">
+        <input type="radio" name="mode" value="external" />
+        <div><b>Separate server</b><span>Connect to a backend you run yourself (or a remote one).</span></div>
+      </label>
+    </div>
+
+    <div id="builtinFields">
+      <label class="field">Database</label>
+      <div class="modes">
+        <label class="mode" id="embeddedChoice">
+          <input type="radio" name="database" value="embedded" />
+          <div><b>Included database (recommended)</b><span>Nothing to install. Your data is stored inside this app's folder.</span></div>
+        </label>
+        <label class="mode">
+          <input type="radio" name="database" value="custom" />
+          <div><b>My own MySQL</b><span>Use a MySQL/MariaDB server you already run.</span></div>
+        </label>
+      </div>
+      <div id="customDbFields">
+        <input id="databaseUrl" type="text" spellcheck="false" autocomplete="off" placeholder="mysql://root:password@localhost:3306/cloudix" />
+        <div class="hint">The database (for example <code>cloudix</code>) must already exist. Avoid symbols like @ or # in the password.</div>
+      </div>
+    </div>
+
+    <div id="externalFields" class="hidden">
+      <label class="field" for="serverUrl">Server address</label>
+      <input id="serverUrl" type="text" spellcheck="false" autocomplete="off" placeholder="http://localhost:4000" />
+      <div class="box">
+        For Google sign-in to return to this app, set this on your server and restart it:<br />
+        <code>FRONTEND_URL=<span id="origin"></span></code>
+      </div>
+    </div>
+
+    <div class="error" id="error" role="alert"></div>
+
+    <div class="row">
+      <button id="cancel" type="button">Cancel</button>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script src="settings.js"></script>
+  </body>
+</html>
