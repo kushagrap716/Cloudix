@@ -14,7 +14,7 @@ CREATE TABLE `s3_storage_configs` (
   `access_key_id_encrypted` TEXT NOT NULL,
   `secret_access_key_encrypted` TEXT NOT NULL,
   `force_path_style` BOOLEAN NOT NULL DEFAULT false,
-  `prefix` VARCHAR(191) NOT NULL DEFAULT '9drive',
+  `prefix` VARCHAR(191) NOT NULL DEFAULT 'cloudix',
   `quota_bytes` BIGINT NULL,
   `status` VARCHAR(32) NOT NULL DEFAULT 'active',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
