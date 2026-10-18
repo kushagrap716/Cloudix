@@ -38,15 +38,35 @@ authRouter.post('/register', async (req, res, next) => {
     }
 
     const passwordHash = await hashPassword(password)
-    const user = await prisma.user.create({
-      data: {
-        name,
-        email,
-        passwordHash,
-        status: 'active',
-      },
-      select: { id: true, name: true, email: true, status: true },
-    })
+
+    // Seamless upgrade: if an existing installation had a built-in local user ('local@cloudix.local'),
+    // claim and update that account so all previously connected accounts and files are preserved.
+    const localUser = await prisma.user.findFirst({ where: { email: 'local@cloudix.local' } })
+    const totalUsers = await prisma.user.count()
+
+    let user: { id: string; name: string; email: string; status: string }
+    if (localUser && totalUsers === 1) {
+      user = await prisma.user.update({
+        where: { id: localUser.id },
+        data: {
+          name,
+          email,
+          passwordHash,
+          status: 'active',
+        },
+        select: { id: true, name: true, email: true, status: true },
+      })
+    } else {
+      user = await prisma.user.create({
+        data: {
+          name,
+          email,
+          passwordHash,
+          status: 'active',
+        },
+        select: { id: true, name: true, email: true, status: true },
+      })
+    }
 
     // Create session
     const rawRefreshToken = randomToken(48)
