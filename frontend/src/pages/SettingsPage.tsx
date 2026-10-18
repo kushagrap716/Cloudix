@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Bell, Cloud, Database, Globe, HardDrive, Link2, RefreshCw, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Bell, Cloud, Database, Globe, HardDrive, Link2, LogOut, RefreshCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { DummyModal } from '@/components/drive/DummyModal'
 import { PageHeader } from '@/components/drive/PageHeader'
 import { apiFetch, formatBytes, API_URL } from '@/lib/api'
+import { clearSession } from '@/lib/auth'
 import { getGravatarUrl } from '@/lib/gravatar'
 
 type ConnectedAccount = { id: string; provider: string; email: string; displayName?: string | null; status: string; storageAccount?: { totalBytes: string | null; usedBytes: string; availableBytes: string | null; lastSyncedAt: string | null } | null }
@@ -25,8 +27,21 @@ function availableLabel(account: ConnectedAccount) {
 }
 
 export function SettingsPage() {
+  const navigate = useNavigate()
   const [user, setUser] = useState<{ name?: string; email?: string } | null>(null)
   useEffect(() => { apiFetch<{ user: { name?: string; email?: string } }>('/auth/me').then((d) => setUser(d.user)).catch(() => undefined) }, [])
+
+  async function handleLogout() {
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' })
+    } catch {
+      // ignore
+    } finally {
+      clearSession()
+      navigate('/login', { replace: true })
+    }
+  }
+
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([])
   const [message, setMessage] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -315,7 +330,19 @@ export function SettingsPage() {
                   onError={() => setAvatarError(true)}
                 />
               )}
-              <div className="flex-1"><h2 className="text-lg font-bold">{user?.name ?? 'User'}</h2><p className="text-xs text-slate-500 mt-0.5">{user?.email ?? '-'}</p></div>
+              <div className="flex-1">
+                <h2 className="text-lg font-bold">{user?.name ?? 'User'}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">{user?.email ?? '-'}</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLogout}
+                className="text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 gap-1.5 rounded-xl font-semibold"
+              >
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </Button>
             </div>
           </Card>
 

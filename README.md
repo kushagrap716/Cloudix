@@ -4,20 +4,7 @@
 
 Cloudix is a storage gateway web and desktop application for uniting multiple Google Drive and S3-compatible storage accounts into one seamless virtual storage dashboard.
 
-There is no multi-user registration or login screen: Cloudix is built for personal, homelab, and self-hosted use, opening directly to your storage dashboard as a single built-in local user. Connect your Google Drive accounts from Settings, track combined quotas, upload files into a dedicated `cloudix` folder, organize files with virtual folders, preview/stream files, sync MySQL from Google Drive, and let the backend automatically route uploads to connected drives with sufficient free space.
-
----
-
-> [!CAUTION]
-> **CRITICAL SECURITY NOTICE FOR SERVER / VPS DEPLOYMENTS**
-> Cloudix runs as a single built-in user and has **no login screen**. Anyone who can reach the web interface has full control over all files and connected Google Drive / S3 storage accounts.
->
-> **NEVER expose ports `5173` or `4000` directly to the public internet.**
-> When deploying on a VPS or remote server, you **MUST** put Cloudix behind:
-> - **A reverse proxy with HTTP Basic Auth** (Nginx / Caddy with `htpasswd`), or
-> - **A private mesh VPN** (e.g., [Tailscale](https://tailscale.com) or WireGuard), or
-> - **Zero Trust Tunnel / Cloudflare Access** with email/OAuth protection, or
-> - **An SSH Tunnel** (`ssh -N -L 5173:127.0.0.1:5173 -L 4000:127.0.0.1:4000 user@your-vps`).
+Cloudix features a secure authentication system with Argon2 password hashing and JWT sessions. Create an account or sign in to access your storage dashboard. Connect your Google Drive accounts from Settings, track combined quotas, upload files into a dedicated `cloudix` folder, organize files with virtual folders, preview/stream files, sync MySQL from Google Drive, and let the backend automatically route uploads to connected drives with sufficient free space.
 
 ---
 
@@ -26,6 +13,7 @@ There is no multi-user registration or login screen: Cloudix is built for person
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
 ## Features
 
+- **Secure Authentication System**: User registration and login protected with Argon2 password hashing, JWT access tokens, and automatic session refresh.
 - **Multi-Account Storage Gateway**: Connect multiple Google Drive and S3-compatible accounts into one virtual drive.
 - **S3-Compatible Storage Support**: Custom endpoints for MinIO, Cloudflare R2, Wasabi, Backblaze B2, and AWS S3.
 - **Direct Upload Streaming**: Files stream directly through the backend into storage—never saved to server disk.
@@ -33,7 +21,6 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 - **Large File Splitting**: Files that exceed the remaining capacity of a single drive are automatically split across multiple connected drives and stitched seamlessly upon download or preview.
 - **Upload Routing Policies**: Configurable routing modes (`most-available`, `round-robin`, and `priority-order`).
 - **External Upload API**: Upload files programmatically via `POST /api/v1/uploads` using hashed API keys.
-- **Zero Login Friction**: Designed for personal use—opens straight to your dashboard.
 - **Starred Files & Organization**: Favorite files, organize with virtual folders, rename, move, and batch delete.
 - **Database Backup & Restore**: Download database backups or restore directly from the Settings UI.
 - **Quota Tracking & Auto-Sync**: View total, used, and available space across all accounts and sync changes from Google Drive.
@@ -307,11 +294,15 @@ Cloudix includes an Electron desktop app with an embedded, isolated MariaDB data
 
 ## 8. API Overview
 
-All routes run as the built-in local user (`requireAuth`).
+Protected routes require `Authorization: Bearer <accessToken>` header.
 
 ### Auth
 ```txt
-GET /auth/me       (Returns current local user session)
+POST /auth/register   (Register a new user account)
+POST /auth/login      (Log in with email & password)
+POST /auth/refresh    (Refresh access token using refreshToken)
+POST /auth/logout     (Revoke current user session)
+GET /auth/me          (Returns current authenticated user)
 ```
 
 ### Storage Accounts & Quota

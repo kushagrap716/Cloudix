@@ -8,7 +8,6 @@ import {
   History,
   Menu,
   Moon,
-  MoreVertical,
   Search,
   Settings,
   Share2,
@@ -22,14 +21,15 @@ import {
   Info,
   CheckCircle,
   ChevronDown,
-  Upload
+  Upload,
+  LogOut
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { BrandLogo } from '@/components/drive/BrandLogo'
 import { Input } from '@/components/ui/input'
 import { apiFetch, formatBytes } from '@/lib/api'
 import { useUpload } from '@/context/UploadContext'
-import { type AuthUser } from '@/lib/auth'
+import { clearSession, type AuthUser } from '@/lib/auth'
 import { getGravatarUrl } from '@/lib/gravatar'
 import { cn } from '@/lib/utils'
 
@@ -107,11 +107,24 @@ function SystemInfoDropdown({ storage }: { storage: any }) {
 }
 
 function Sidebar({ onNavigate, user, storage, breakdown }: { onNavigate?: () => void; user: AuthUser | null; storage: StorageSummary | null; breakdown: StorageBreakdown }) {
+  const navigate = useNavigate()
   const used = Number(storage?.usedBytes ?? 0)
   const total = Number(storage?.totalBytes ?? 0)
   const progress = total > 0 ? Math.min(100, (used / total) * 100) : 0
   const [profileImageUrl, setProfileImageUrl] = useState('')
   const [avatarError, setAvatarError] = useState(false)
+
+  async function handleLogout() {
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' })
+    } catch {
+      // ignore
+    } finally {
+      clearSession()
+      navigate('/login', { replace: true })
+    }
+  }
+
   const items = [
     ['Photo', formatBytes(breakdown.photo), 'bg-lime-500'],
     ['Video', formatBytes(breakdown.video), 'bg-yellow-400'],
@@ -145,10 +158,17 @@ function Sidebar({ onNavigate, user, storage, breakdown }: { onNavigate?: () => 
           />
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-bold text-slate-900 leading-none">{user?.name ?? 'User'}</p>
+          <p className="truncate text-[14px] font-bold text-slate-900 leading-none">{user?.name ?? 'User'}</p>
           <p className="truncate text-xs text-slate-500 mt-1">{user?.email ?? 'Loading...'}</p>
         </div>
-        <MoreVertical className="h-4 w-4 text-slate-400" />
+        <button
+          type="button"
+          onClick={handleLogout}
+          title="Sign Out"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
       </div>
 
       <nav className="grid gap-1">
@@ -163,6 +183,14 @@ function Sidebar({ onNavigate, user, storage, breakdown }: { onNavigate?: () => 
             {item.label}
           </NavLink>
         ))}
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="inline-flex h-10 items-center gap-2.5 rounded-xl px-3.5 text-[13px] font-bold text-rose-600 hover:bg-rose-50 hover:text-rose-700 transition-all border border-transparent mt-1"
+        >
+          <LogOut className="h-4 w-4" />
+          Sign Out
+        </button>
       </nav>
 
       <div className="mt-auto border-t border-slate-200/60 pt-4 text-[13px]">
