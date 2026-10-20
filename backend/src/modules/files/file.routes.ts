@@ -38,44 +38,81 @@ fileRouter.use(requireAuth)
 
 fileRouter.get('/', async (req: AuthRequest, res, next) => {
   try {
+    const emptyToUndefined = (val: unknown) => (typeof val === 'string' && val.trim() === '' ? undefined : val)
+
     const query = z.object({
-      folderId: z.string().optional(),
-      q: z.string().trim().max(255).optional(),
-      kind: z.enum(['image', 'video', 'pdf', 'doc', 'archive']).optional(),
-      accountId: z.string().optional(),
-      minSize: z.coerce.number().optional(),
-      maxSize: z.coerce.number().optional(),
-      startDate: z.string().datetime().optional(),
-      endDate: z.string().datetime().optional(),
-      starred: z.enum(['true']).optional()
+      folderId: z.preprocess(emptyToUndefined, z.string().optional()),
+      q: z.preprocess(emptyToUndefined, z.string().trim().max(255).optional()),
+      kind: z.preprocess(emptyToUndefined, z.enum(['image', 'video', 'pdf', 'doc', 'archive']).optional()),
+      accountId: z.preprocess(emptyToUndefined, z.string().optional()),
+      minSize: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional()),
+      maxSize: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional()),
+      startDate: z.preprocess(emptyToUndefined, z.string().trim().optional()),
+      endDate: z.preprocess(emptyToUndefined, z.string().trim().optional()),
+      starred: z.preprocess(emptyToUndefined, z.enum(['true']).optional()),
+      recent: z.preprocess(emptyToUndefined, z.enum(['true']).optional())
     }).parse(req.query)
 
-    const typeFilters: Record<string, string[]> = {
-      image: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'],
-      video: ['video/mp4', 'video/mpeg', 'video/ogg', 'video/quicktime', 'video/webm'],
-      pdf: ['application/pdf'],
-      doc: ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'],
-      archive: ['application/zip', 'application/x-rar-compressed', 'application/x-tar', 'application/x-7z-compressed']
+    const parseFilterDate = (val?: string, isEnd = false) => {
+      if (!val) return undefined
+      const d = new Date(isEnd && !val.includes('T') ? `${val}T23:59:59.999Z` : val)
+      return isNaN(d.getTime()) ? undefined : d
     }
+
+    const startFilterDate = parseFilterDate(query.startDate)
+    const endFilterDate = parseFilterDate(query.endDate, true)
+
+    const typeFilters: Record<string, string[]> = {
+      image: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif', 'image/bmp', 'image/x-icon'],
+      video: ['video/mp4', 'video/mpeg', 'video/ogg', 'video/quicktime', 'video/webm', 'video/x-matroska', 'video/x-msvideo'],
+      pdf: ['application/pdf'],
+      doc: [
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'text/plain',
+        'text/csv',
+        'text/markdown',
+        'application/json'
+      ],
+      archive: ['application/zip', 'application/x-rar-compressed', 'application/x-tar', 'application/x-7z-compressed', 'application/gzip', 'application/x-zip-compressed']
+    }
+
+    // When recent=true, only show files created today
+    const todayStart = (() => {
+      const d = new Date()
+      d.setHours(0, 0, 0, 0)
+      return d
+    })()
 
     const where: any = {
       userId: req.user!.id,
       status: 'active',
-      ...(query.folderId ? { folderId: query.folderId } : {}),
+      ...(query.folderId && !query.recent ? { folderId: query.folderId } : {}),
       ...(query.q ? { name: { contains: query.q } } : {}),
       ...(query.accountId ? { connectedAccountId: query.accountId } : {}),
       ...(query.starred ? { starredAt: { not: null } } : {}),
-      ...(query.kind ? { mimeType: { in: typeFilters[query.kind] || [] } } : {}),
+      ...(query.kind === 'image' ? { mimeType: { startsWith: 'image/' } } : {}),
+      ...(query.kind === 'video' ? { mimeType: { startsWith: 'video/' } } : {}),
+      ...(query.kind && query.kind !== 'image' && query.kind !== 'video' ? { mimeType: { in: typeFilters[query.kind] || [] } } : {}),
       ...(query.minSize !== undefined || query.maxSize !== undefined ? {
         sizeBytes: {
           ...(query.minSize !== undefined ? { gte: BigInt(query.minSize) } : {}),
           ...(query.maxSize !== undefined ? { lte: BigInt(query.maxSize) } : {})
         }
       } : {}),
-      ...(query.startDate || query.endDate ? {
+      ...(query.recent ? {
         createdAt: {
-          ...(query.startDate ? { gte: new Date(query.startDate) } : {}),
-          ...(query.endDate ? { lte: new Date(query.endDate) } : {})
+          gte: todayStart,
+          ...(endFilterDate ? { lte: endFilterDate } : {})
+        }
+      } : startFilterDate || endFilterDate ? {
+        createdAt: {
+          ...(startFilterDate ? { gte: startFilterDate } : {}),
+          ...(endFilterDate ? { lte: endFilterDate } : {})
         }
       } : {})
     }
@@ -87,7 +124,8 @@ fileRouter.get('/', async (req: AuthRequest, res, next) => {
         folder: { select: { id: true, name: true } },
         _count: { select: { parts: true } }
       },
-      orderBy: query.starred ? { starredAt: 'desc' } : { createdAt: 'desc' }
+      orderBy: query.starred ? { starredAt: 'desc' } : { createdAt: 'desc' },
+      ...(query.recent ? { take: 50 } : {})
     })
     return res.json({ files: files.map((file) => ({ ...file, sizeBytes: file.sizeBytes.toString() })) })
   } catch (error) {

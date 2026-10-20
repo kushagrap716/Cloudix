@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { CheckCircle, Cloud, Database, Filter, Gauge, Link2, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { CheckCircle, ChevronDown, Cloud, Database, Filter, Gauge, Link2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/components/drive/PageHeader'
@@ -51,6 +51,9 @@ export function QuotaTrackerPage() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null)
+  const [providerFilter, setProviderFilter] = useState('all')
+  const [accountFilter, setAccountFilter] = useState('all')
+  const [sortBy, setSortBy] = useState<'most_available' | 'most_used' | 'name'>('most_available')
 
   async function load() {
     const [summaryData, accountData, policyData] = await Promise.all([
@@ -145,9 +148,80 @@ export function QuotaTrackerPage() {
     saveRoutingPolicy({ ...routingPolicy, priorityAccountIds: nextIds }).catch((error) => setMessage(error instanceof Error ? error.message : 'Failed to update routing policy'))
   }
 
+  async function toggleAutoRefresh() {
+    const next = !autoRefresh
+    setAutoRefresh(next)
+    if (next) {
+      setMessage('Auto-refresh enabled (updating every 35s).')
+      await refresh()
+    } else {
+      setMessage('Auto-refresh disabled.')
+    }
+  }
+
+  const filteredAccounts = useMemo(() => {
+    let list = [...accounts]
+    if (providerFilter !== 'all') {
+      list = list.filter((a) => a.provider === providerFilter)
+    }
+    if (accountFilter !== 'all') {
+      list = list.filter((a) => a.id === accountFilter)
+    }
+    if (sortBy === 'most_available') {
+      list.sort((a, b) => {
+        const aFree = BigInt(a.storageAccount?.availableBytes || '0')
+        const bFree = BigInt(b.storageAccount?.availableBytes || '0')
+        return bFree > aFree ? 1 : bFree < aFree ? -1 : 0
+      })
+    } else if (sortBy === 'most_used') {
+      list.sort((a, b) => {
+        const aUsed = BigInt(a.storageAccount?.usedBytes || '0')
+        const bUsed = BigInt(b.storageAccount?.usedBytes || '0')
+        return bUsed > aUsed ? 1 : bUsed < aUsed ? -1 : 0
+      })
+    } else if (sortBy === 'name') {
+      list.sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email))
+    }
+    return list
+  }, [accounts, providerFilter, accountFilter, sortBy])
+
   return (
     <>
-      <PageHeader title="Quota Tracker" description="Track and manage connected provider storage limits." actions={<><Button variant="outline" onClick={() => setAutoRefresh(!autoRefresh)}><CheckCircle className="h-4 w-4" />Auto-refresh {autoRefresh ? 'On' : 'Off'}</Button><Button variant="outline" onClick={refresh} disabled={refreshing}><RefreshCw className={refreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />{refreshing ? 'Refreshing...' : 'Refresh'}</Button><Button onClick={connectDrive}><Link2 className="h-4 w-4" />Connect Drive</Button></>} />
+      <PageHeader
+        title="Quota Tracker"
+        description="Track and manage connected provider storage limits."
+        actions={
+          <>
+            <Button
+              variant={autoRefresh ? 'default' : 'outline'}
+              onClick={toggleAutoRefresh}
+              className={cn(
+                'transition-all',
+                autoRefresh
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-sm shadow-emerald-600/20'
+                  : ''
+              )}
+            >
+              {autoRefresh ? (
+                <span className="relative flex h-2 w-2 mr-1">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-200 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                </span>
+              ) : (
+                <CheckCircle className="h-4 w-4" />
+              )}
+              Auto-refresh {autoRefresh ? 'On' : 'Off'}
+            </Button>
+            <Button variant="outline" onClick={refresh} disabled={refreshing}>
+              <RefreshCw className={refreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </Button>
+            <Button onClick={connectDrive}>
+              <Link2 className="h-4 w-4" />Connect Drive
+            </Button>
+          </>
+        }
+      />
       {message ? <p className="mt-5 rounded-xl bg-blue-50 p-3 text-sm text-blue-700">{message}</p> : null}
 
       <div className="mt-8 grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
@@ -158,9 +232,67 @@ export function QuotaTrackerPage() {
       </div>
 
       <div className="mt-8 flex flex-wrap items-center gap-3">
-        <Button variant="outline"><Filter className="h-4 w-4" />All Providers</Button>
-        <Button variant="outline">All Accounts</Button>
-        <Button variant="soft"><Gauge className="h-4 w-4" />Most available</Button>
+        {/* Provider Filter */}
+        <div className="relative inline-block">
+          <select
+            value={providerFilter}
+            onChange={(e) => setProviderFilter(e.target.value)}
+            className="h-11 appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-sm font-semibold text-slate-950 shadow-sm transition-all hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer dark:bg-slate-900 dark:border-slate-800 dark:text-slate-100"
+          >
+            <option value="all">All Providers</option>
+            <option value="google_drive">Google Drive</option>
+            <option value="s3">S3 Storage</option>
+          </select>
+          <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        </div>
+
+        {/* Account Filter */}
+        <div className="relative inline-block">
+          <select
+            value={accountFilter}
+            onChange={(e) => setAccountFilter(e.target.value)}
+            className="h-11 appearance-none rounded-xl border border-slate-200 bg-white pl-4 pr-8 text-sm font-semibold text-slate-950 shadow-sm transition-all hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer dark:bg-slate-900 dark:border-slate-800 dark:text-slate-100"
+          >
+            <option value="all">All Accounts</option>
+            {accounts.map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.displayName || acc.email}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        </div>
+
+        {/* Sort Filter */}
+        <div className="relative inline-block">
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="h-11 appearance-none rounded-xl border border-slate-200 bg-slate-100 pl-9 pr-8 text-sm font-semibold text-slate-950 shadow-sm transition-all hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
+          >
+            <option value="most_available">Most available</option>
+            <option value="most_used">Most used</option>
+            <option value="name">Account name</option>
+          </select>
+          <Gauge className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        </div>
+
+        {(providerFilter !== 'all' || accountFilter !== 'all' || sortBy !== 'most_available') && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setProviderFilter('all')
+              setAccountFilter('all')
+              setSortBy('most_available')
+            }}
+            className="text-xs text-blue-600 hover:text-blue-700"
+          >
+            Reset filters
+          </Button>
+        )}
       </div>
 
       <Card className="mt-6 p-5">
@@ -184,14 +316,34 @@ export function QuotaTrackerPage() {
       </Card>
 
       <div className="mt-6 grid gap-5 md:grid-cols-2">
-        {accounts.length === 0 ? (
+        {filteredAccounts.length === 0 ? (
           <Card className="col-span-full p-8 text-center">
             <Cloud className="mx-auto h-10 w-10 text-blue-600" />
-            <h2 className="mt-4 text-xl font-extrabold">No connected drives</h2>
-            <p className="mt-2 text-sm text-slate-500">Connect Google Drive or S3-compatible storage to start tracking quota.</p>
-            <Button className="mt-5" onClick={connectDrive}><Link2 className="h-4 w-4" />Connect Drive</Button>
+            <h2 className="mt-4 text-xl font-extrabold">
+              {accounts.length === 0 ? 'No connected drives' : 'No matching drives found'}
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              {accounts.length === 0
+                ? 'Connect Google Drive or S3-compatible storage to start tracking quota.'
+                : 'Try clearing your filter criteria to see all connected drives.'}
+            </p>
+            {accounts.length === 0 ? (
+              <Button className="mt-5" onClick={connectDrive}><Link2 className="h-4 w-4" />Connect Drive</Button>
+            ) : (
+              <Button
+                className="mt-5"
+                variant="outline"
+                onClick={() => {
+                  setProviderFilter('all')
+                  setAccountFilter('all')
+                  setSortBy('most_available')
+                }}
+              >
+                Clear Filters
+              </Button>
+            )}
           </Card>
-        ) : accounts.map((account) => {
+        ) : filteredAccounts.map((account) => {
           const percent = pct(account)
           const color = statusColor(percent)
           return (

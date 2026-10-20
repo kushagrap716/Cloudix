@@ -19,5 +19,16 @@ if (fs.existsSync(mysqlBackupPath)) {
   console.log('✓ Switched schema.prisma provider to mysql')
 }
 
+const envPath = path.resolve(__dirname, '../../.env')
+if (fs.existsSync(envPath)) {
+  let envContent = fs.readFileSync(envPath, 'utf8')
+  if (envContent.includes('file:')) {
+    envContent = envContent.replace(/DATABASE_URL=.*/, 'DATABASE_URL="mysql://root:password@localhost:3306/cloudix"')
+    fs.writeFileSync(envPath, envContent, 'utf8')
+    console.log('✓ Restored DATABASE_URL in .env to MySQL')
+  }
+}
+
 execSync('npx prisma generate', { cwd: path.resolve(__dirname, '../..'), stdio: 'inherit' })
 console.log('✓ Prisma client regenerated for MySQL.')
+

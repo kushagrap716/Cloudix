@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import { API_URL, apiFetch } from '@/lib/api'
+import { getAccessToken } from '@/lib/auth'
 
 export type UploadProgressStatus = 'uploading' | 'done' | 'error' | 'partial'
 export type UploadProgressFile = { name: string; size: number; percent: number; status: UploadProgressStatus }
@@ -74,22 +75,47 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       let resData: { status: string; offset?: string } | null = null
       let lastError: any = null
 
-      while (attempt < 3 && !success) {
+      while (attempt < 4 && !success) {
         attempt++
         try {
+          const token = getAccessToken()
+          const headers: Record<string, string> = {
+            'Content-Range': `bytes ${startOffset}-${endOffset - 1}/${file.size}`,
+            'Content-Length': String(chunk.size)
+          }
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`
+          }
+
           const response = await fetch(`${API_URL}/uploads/resumable/chunk/${sessionId}`, {
             method: 'PUT',
-            headers: {
-              'Content-Range': `bytes ${startOffset}-${endOffset - 1}/${file.size}`,
-              'Content-Length': String(chunk.size)
-            },
+            headers,
             body: chunk
           })
 
           if (!response.ok) {
             const errText = await response.text().catch(() => '')
-            if (response.status >= 500 || response.status === 429) {
+            // Check if transient network reset, socket error, or Google stream reading error
+            const isTransient = response.status >= 500 || response.status === 429 || /stream reading error|wsarecv|forcibly closed|ECONNRESET/i.test(errText)
+            if (isTransient && attempt < 4) {
               await new Promise(r => setTimeout(r, attempt * 1200))
+              // Query status to see if server already committed the bytes
+              try {
+                const statusData = await apiFetch<{ status: string; offset: string }>(`/uploads/resumable/status/${sessionId}`)
+                if (statusData.status === 'completed') {
+                  onProgress(100)
+                  return
+                }
+                const serverOffset = Number(statusData.offset)
+                if (serverOffset > startOffset) {
+                  startOffset = serverOffset
+                  resData = { status: 'uploading', offset: String(serverOffset) }
+                  success = true
+                  break
+                }
+              } catch {
+                // Continue retry
+              }
               continue
             }
             throw new Error(`Chunk upload failed: ${response.statusText} ${errText}`)
@@ -97,15 +123,31 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
           resData = await response.json() as { status: string; offset?: string }
           success = true
-        } catch (err) {
+        } catch (err: any) {
           lastError = err
-          if (attempt >= 3) break
+          if (attempt >= 4) break
           await new Promise(r => setTimeout(r, attempt * 1200))
+          try {
+            const statusData = await apiFetch<{ status: string; offset: string }>(`/uploads/resumable/status/${sessionId}`)
+            if (statusData.status === 'completed') {
+              onProgress(100)
+              return
+            }
+            const serverOffset = Number(statusData.offset)
+            if (serverOffset > startOffset) {
+              startOffset = serverOffset
+              resData = { status: 'uploading', offset: String(serverOffset) }
+              success = true
+              break
+            }
+          } catch {
+            // ignore
+          }
         }
       }
 
       if (!success || !resData) {
-        throw lastError || new Error('Chunk upload failed after 3 retries')
+        throw lastError || new Error('Chunk upload failed after retries')
       }
 
       if (resData.status === 'completed') {
@@ -164,6 +206,15 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         })
       }
     }
+
+    setUploadProgress((current) => {
+      const anyError = current.files.some((f) => f.status === 'error')
+      return {
+        ...current,
+        percent: 100,
+        status: anyError ? 'partial' : 'done'
+      }
+    })
 
     // Dispatch global events so active pages reload their data
     window.dispatchEvent(new Event('cloudix:storage-changed'))

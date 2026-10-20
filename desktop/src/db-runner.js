@@ -140,6 +140,11 @@ function startServer({ mariadb, dataDir, port, logPath, extraArgs, timeoutMs }) 
       `--datadir=${dataDir}`,
       `--port=${port}`,
       '--bind-address=127.0.0.1',
+      '--skip-name-resolve',
+      '--skip-host-cache',
+      '--performance-schema=OFF',
+      '--innodb-flush-log-at-trx-commit=2',
+      '--innodb-buffer-pool-size=64M',
       '--console',
       '--character-set-server=utf8mb4',
       '--collation-server=utf8mb4_unicode_ci',
@@ -271,7 +276,11 @@ async function killLeftoverDatabase(pidPath) {
   }
   if (info && Number.isInteger(info.pid) && info.pid > 0 && Number.isInteger(info.port) && (await canConnect(info.port))) {
     try {
-      process.kill(info.pid)
+      if (IS_WIN) {
+        require('node:child_process').spawnSync('taskkill', ['/F', '/T', '/PID', String(info.pid)], { windowsHide: true })
+      } else {
+        process.kill(info.pid)
+      }
     } catch {
       /* already gone */
     }

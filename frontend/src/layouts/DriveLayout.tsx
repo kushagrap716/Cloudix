@@ -281,6 +281,18 @@ export function DriveLayout() {
     localStorage.setItem('cloudix:theme', theme)
   }, [theme])
 
+  useEffect(() => {
+    if (uploadProgress.open) {
+      const allFilesDone = uploadProgress.files.length > 0 && uploadProgress.files.every((f) => f.status === 'done')
+      if (uploadProgress.status === 'done' || allFilesDone) {
+        const timer = setTimeout(() => {
+          setUploadProgress((current) => ({ ...current, open: false }))
+        }, 1500)
+        return () => clearTimeout(timer)
+      }
+    }
+  }, [uploadProgress.open, uploadProgress.status, uploadProgress.files, setUploadProgress])
+
   function toggleTheme() {
     setTheme((t) => (t === 'light' ? 'dark' : 'light'))
   }
@@ -347,7 +359,9 @@ export function DriveLayout() {
       nextParams.set('startDate', new Date(filterStartDate).toISOString())
     }
     if (filterEndDate) {
-      nextParams.set('endDate', new Date(filterEndDate).toISOString())
+      const end = new Date(filterEndDate)
+      end.setHours(23, 59, 59, 999)
+      nextParams.set('endDate', end.toISOString())
     }
 
     setFiltersOpen(false)
@@ -379,6 +393,10 @@ export function DriveLayout() {
     applyFilters()
   }
 
+  const hasActiveFilters = Boolean(
+    filterKind || filterAccountId || filterMinSize || filterMaxSize || filterStartDate || filterEndDate
+  )
+
   useEffect(() => {
     apiFetch<{ user: AuthUser }>('/auth/me')
       .then((data) => {
@@ -393,7 +411,10 @@ export function DriveLayout() {
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') setInfoOpen(false)
+      if (event.key === 'Escape') {
+        setInfoOpen(false)
+        setFiltersOpen(false)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -443,21 +464,24 @@ export function DriveLayout() {
               <form onSubmit={searchFiles} className="relative w-full">
                 <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
                 <Input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="Search Documents" className="pl-11 pr-12" />
-                <button type="button" onClick={() => setFiltersOpen(!filtersOpen)} className={cn("absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-900 transition-colors", filtersOpen && "text-blue-600 hover:text-blue-700")} aria-label="Search filters"><SlidersHorizontal className="h-5 w-5" /></button>
+                <button type="button" onClick={() => setFiltersOpen(!filtersOpen)} className={cn("absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer", (filtersOpen || hasActiveFilters) && "text-blue-600 hover:text-blue-700 dark:text-blue-400")} aria-label="Search filters">
+                  <SlidersHorizontal className="h-5 w-5" />
+                  {hasActiveFilters && <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-blue-600 ring-2 ring-white dark:ring-slate-900" />}
+                </button>
               </form>
 
               {filtersOpen && (
-                <div className="absolute left-0 right-0 top-12 z-50 rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-top-2 duration-150">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <span className="text-sm font-extrabold text-slate-950">Advanced Search Filters</span>
+                <div className="absolute left-0 top-12 z-50 w-[min(calc(100vw-2rem),520px)] sm:w-[520px] max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-top-2 duration-150 dark:border-slate-800 dark:bg-slate-900/95">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <span className="text-sm font-extrabold text-slate-950 dark:text-slate-100">Advanced Search Filters</span>
                     <button type="button" onClick={clearFilters} className="text-xs font-bold text-blue-600 hover:text-blue-700">Clear All</button>
                   </div>
 
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     {/* File Kind */}
                     <div>
-                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">File Type</label>
-                      <select value={filterKind} onChange={(e) => setFilterKind(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">File Type</label>
+                      <select value={filterKind} onChange={(e) => setFilterKind(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100">
                         <option value="">All Types</option>
                         <option value="image">Image</option>
                         <option value="video">Video</option>
@@ -469,8 +493,8 @@ export function DriveLayout() {
 
                     {/* Connected Account */}
                     <div>
-                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Connected Account</label>
-                      <select value={filterAccountId} onChange={(e) => setFilterAccountId(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Connected Account</label>
+                      <select value={filterAccountId} onChange={(e) => setFilterAccountId(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100">
                         <option value="">All Accounts</option>
                         {accounts.map((acc) => (
                           <option key={acc.id} value={acc.id}>{acc.email} ({acc.provider})</option>
@@ -479,27 +503,61 @@ export function DriveLayout() {
                     </div>
 
                     {/* Size range */}
-                    <div>
-                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Size Range (MB)</label>
-                      <div className="mt-1 flex items-center gap-2">
-                        <input type="number" placeholder="Min" value={filterMinSize} onChange={(e) => setFilterMinSize(e.target.value)} className="block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none" />
-                        <span className="text-slate-400 text-xs font-semibold">to</span>
-                        <input type="number" placeholder="Max" value={filterMaxSize} onChange={(e) => setFilterMaxSize(e.target.value)} className="block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none" />
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Size Range (MB)</label>
+                      <div className="mt-1 grid grid-cols-2 gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 font-semibold shrink-0 w-8">Min</span>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={filterMinSize}
+                            onChange={(e) => setFilterMinSize(e.target.value)}
+                            className="block w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 font-semibold shrink-0 w-8">Max</span>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="Unlimited"
+                            value={filterMaxSize}
+                            onChange={(e) => setFilterMaxSize(e.target.value)}
+                            className="block w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
+                          />
+                        </div>
                       </div>
                     </div>
 
                     {/* Date range */}
-                    <div>
-                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Date Range</label>
-                      <div className="mt-1 flex items-center gap-2">
-                        <input type="date" value={filterStartDate} onChange={(e) => setFilterStartDate(e.target.value)} className="block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none" />
-                        <span className="text-slate-400 text-xs font-semibold">to</span>
-                        <input type="date" value={filterEndDate} onChange={(e) => setFilterEndDate(e.target.value)} className="block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none" />
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Date Range</label>
+                      <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 font-semibold shrink-0 w-8">From</span>
+                          <input
+                            type="date"
+                            value={filterStartDate}
+                            onChange={(e) => setFilterStartDate(e.target.value)}
+                            className="block w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 font-semibold shrink-0 w-8">To</span>
+                          <input
+                            type="date"
+                            value={filterEndDate}
+                            onChange={(e) => setFilterEndDate(e.target.value)}
+                            className="block w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-500 focus:bg-white focus:outline-none dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4">
+                  <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 dark:border-slate-800 pt-4">
                     <Button variant="outline" size="sm" type="button" onClick={() => setFiltersOpen(false)}>Cancel</Button>
                     <Button variant="default" size="sm" type="button" onClick={applyFilters}>Apply Filters</Button>
                   </div>
@@ -528,9 +586,9 @@ export function DriveLayout() {
       </div>
 
       {uploadProgress.open ? (
-        <div className="fixed inset-x-3 bottom-3 z-[70] max-h-[70dvh] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20 sm:inset-x-auto sm:bottom-5 sm:right-5 sm:w-[min(420px,calc(100vw-2.5rem))]">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-            <div className="flex items-center gap-2 font-extrabold text-sm text-slate-950">
+        <div className="upload-progress-popup fixed inset-x-3 bottom-3 z-[70] max-h-[70dvh] overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl shadow-slate-900/40 sm:inset-x-auto sm:bottom-5 sm:right-5 sm:w-[min(420px,calc(100vw-2.5rem))]">
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4 py-3">
+            <div className="flex items-center gap-2 font-extrabold text-sm text-slate-950 dark:text-slate-100">
               {uploadProgress.status === 'done' ? <CheckCircle className="h-5 w-5 text-emerald-500" /> : uploadProgress.status === 'partial' || uploadProgress.status === 'error' ? <X className="h-5 w-5 text-red-500" /> : <Upload className="h-5 w-5 text-blue-600" />}
               {uploadProgress.status === 'done' ? 'Upload complete' : uploadProgress.status === 'partial' ? 'Upload completed with errors' : uploadProgress.status === 'error' ? 'Upload failed' : uploadProgress.percent >= 99 ? 'Processing on server' : 'Uploading files'}
             </div>
@@ -542,21 +600,21 @@ export function DriveLayout() {
           {!uploadProgressCollapsed && (
             <div className="p-4">
               <div className="flex items-center justify-between gap-3 text-sm">
-                <p className="truncate font-semibold">{uploadProgress.fileName}</p>
-                <span className="text-slate-500">{uploadProgress.percent}%</span>
+                <p className="truncate font-semibold text-slate-900 dark:text-slate-100">{uploadProgress.fileName}</p>
+                <span className="text-slate-500 dark:text-slate-400">{uploadProgress.percent}%</span>
               </div>
-              <div className="mt-3 h-2 rounded-full bg-slate-100">
+              <div className="mt-3 h-2 rounded-full bg-slate-100 dark:bg-slate-800">
                 <div className={uploadProgress.status === 'error' || uploadProgress.status === 'partial' ? 'h-full rounded-full bg-red-500' : uploadProgress.status === 'done' ? 'h-full rounded-full bg-emerald-500' : 'h-full rounded-full bg-blue-600'} style={{ width: `${uploadProgress.percent}%` }} />
               </div>
               {uploadProgress.files.length > 0 ? (
-                <div className="mt-4 grid max-h-64 gap-3 overflow-y-auto pr-1 text-slate-950">
+                <div className="mt-4 grid max-h-64 gap-3 overflow-y-auto pr-1 text-slate-950 dark:text-slate-100">
                   {uploadProgress.files.map((file, index) => (
-                    <div key={`${file.name}-${file.size}-${index}`} className="grid gap-1 rounded-xl bg-slate-50 p-3">
+                    <div key={`${file.name}-${file.size}-${index}`} className="upload-progress-item grid gap-1 rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
                       <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
-                        <p className="min-w-0 flex-1 truncate font-semibold" title={file.name}>{file.name}</p>
-                        <span className="shrink-0 text-xs text-slate-500">{file.percent}%</span>
+                        <p className="min-w-0 flex-1 truncate font-semibold text-slate-900 dark:text-slate-100" title={file.name}>{file.name}</p>
+                        <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">{file.percent}%</span>
                       </div>
-                      <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                      <div className="flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
                         <span>{formatBytes(file.size)}</span>
                         <div className="flex items-center gap-2">
                           {file.status === 'error' && (
@@ -569,7 +627,7 @@ export function DriveLayout() {
                           </span>
                         </div>
                       </div>
-                      <div className="h-1.5 rounded-full bg-slate-200">
+                      <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-700">
                         <div className={file.status === 'error' ? 'h-full rounded-full bg-red-500' : file.status === 'done' ? 'h-full rounded-full bg-emerald-500' : 'h-full rounded-full bg-blue-600'} style={{ width: `${file.percent}%` }} />
                       </div>
                     </div>

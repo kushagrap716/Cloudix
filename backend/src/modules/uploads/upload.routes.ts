@@ -377,8 +377,8 @@ uploadRouter.post('/resumable/init', requireAuth, async (req: AuthRequest, res, 
     const folderId = body.folderId || null
     let targetAccountId = body.targetAccountId
     if (folderId) {
-      const folderRecord = await prisma.folder.findFirstOrThrow({ where: { id: folderId, userId: req.user!.id, deletedAt: null } })
-      if (folderRecord.connectedAccountId) {
+      const folderRecord = await prisma.folder.findFirst({ where: { id: folderId, userId: req.user!.id, deletedAt: null } })
+      if (folderRecord?.connectedAccountId) {
         targetAccountId = folderRecord.connectedAccountId
       }
     }
@@ -509,6 +509,36 @@ uploadRouter.get('/resumable/status/:id', requireAuth, async (req: AuthRequest, 
         return res.json({ status: 'uploading', offset: (lastByte + 1n).toString() })
       }
     } else if (queryRes.ok) {
+      try {
+        const fileMeta = await queryRes.json() as { id: string; name: string; mimeType: string }
+        if (fileMeta?.id) {
+          let existingFile = await prisma.file.findFirst({
+            where: { providerFileId: fileMeta.id, userId: req.user!.id }
+          })
+          if (!existingFile) {
+            existingFile = await prisma.file.create({
+              data: {
+                userId: req.user!.id,
+                connectedAccountId: account.id,
+                folderId: session.folderId,
+                provider: 'google_drive',
+                providerFileId: fileMeta.id,
+                name: fileMeta.name || session.fileName,
+                mimeType: fileMeta.mimeType || session.mimeType,
+                sizeBytes: session.sizeBytes
+              }
+            })
+            await createAuditLog(req.user!.id, 'UPLOAD_FILE', 'file', existingFile.id, { name: existingFile.name, size: existingFile.sizeBytes.toString() })
+            syncQuotaInBackground(account.id, session.id)
+          }
+          await prisma.uploadSession.update({
+            where: { id: session.id },
+            data: { status: 'completed', completedAt: new Date() }
+          })
+        }
+      } catch {
+        /* ignore parse error if response body already consumed or empty */
+      }
       return res.json({ status: 'completed', offset: session.sizeBytes.toString() })
     }
 
@@ -563,6 +593,21 @@ uploadRouter.put('/resumable/chunk/:id', requireAuth, async (req: AuthRequest, r
       return res.status(400).json({ code: 'UNSUPPORTED_PROVIDER', message: 'Only Google Drive resumable uploads supported.' })
     }
 
+    // Read the chunk body safely into memory so connection drops can be retried cleanly
+    let chunkBody: Buffer
+    try {
+      chunkBody = await readChunkBody(req)
+    } catch (error) {
+      if (error instanceof RequestTooLargeError) return res.status(413).json({ code: 'CHUNK_TOO_LARGE', message: 'Upload chunks must be smaller than 64 MB.' })
+      throw error
+    }
+
+    const expectedLength = endByte - startByte + 1n
+    if (BigInt(chunkBody.length) !== expectedLength) {
+      logUpload('chunk length mismatch', { sessionId: session.id, expected: expectedLength.toString(), actual: chunkBody.length })
+      return res.status(400).json({ code: 'CHUNK_LENGTH_MISMATCH', message: 'The chunk size does not match its Content-Range.' })
+    }
+
     const account = await prisma.connectedAccount.findFirstOrThrow({
       where: { id: session.targetConnectedAccountId, userId: req.user!.id }
     })
@@ -570,24 +615,78 @@ uploadRouter.put('/resumable/chunk/:id', requireAuth, async (req: AuthRequest, r
     const drive = google.drive({ version: 'v3', auth })
     const token = await auth.getAccessToken()
 
-    // Stream chunk body from client to Google Drive resumable URI
     const putHeaders = new Headers()
     putHeaders.set('Authorization', `Bearer ${token.token}`)
     putHeaders.set('Content-Range', rangeHeader)
-    putHeaders.set('Content-Length', (endByte - startByte + 1n).toString())
+    putHeaders.set('Content-Length', chunkBody.length.toString())
 
-    const putRes = await fetch(session.googleSessionUri, {
-      method: 'PUT',
-      headers: putHeaders,
-      body: req as any,
-      duplex: 'half'
-    } as any)
+    let putRes: globalThis.Response | null = null
+    let lastNetworkError: any = null
 
-    if (putRes.status === 308) {
-      return res.json({ status: 'uploading', offset: (endByte + 1n).toString() })
+    // Retry sending this chunk to Google Drive up to 3 times in case of transient TCP / wsarecv resets
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        putRes = await fetch(session.googleSessionUri, {
+          method: 'PUT',
+          headers: putHeaders,
+          body: chunkBody as unknown as BodyInit,
+        })
+        if (putRes.status >= 500) {
+          logUpload('google resumable chunk returned 5xx, retrying', { sessionId: session.id, status: putRes.status, attempt })
+          await new Promise((r) => setTimeout(r, attempt * 1000))
+          continue
+        }
+        break
+      } catch (err: any) {
+        lastNetworkError = err
+        logUpload('google resumable chunk network error, retrying', { sessionId: session.id, attempt, error: err?.message || String(err) })
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, attempt * 1000))
+        }
+      }
     }
 
-    if (putRes.ok) {
+    // If direct PUT failed with a network error or non-308/non-ok response, query Google to check what bytes it actually stored
+    if (!putRes || (!putRes.ok && putRes.status !== 308)) {
+      try {
+        const queryRes: globalThis.Response = await fetch(session.googleSessionUri, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token.token}`,
+            'Content-Range': `bytes */${session.sizeBytes}`,
+          },
+        })
+        if (queryRes.status === 308) {
+          const range = queryRes.headers.get('range')
+          let nextOffset = startByte.toString()
+          if (range) {
+            const parts = range.split('-')
+            if (parts[1]) {
+              nextOffset = (BigInt(parts[1]) + 1n).toString()
+            }
+          }
+          return res.json({ status: 'uploading', offset: nextOffset })
+        } else if (queryRes.ok) {
+          putRes = queryRes
+        }
+      } catch {
+        // Query failed, continue with original error handling
+      }
+    }
+
+    if (putRes && putRes.status === 308) {
+      const range = putRes.headers.get('range')
+      let nextOffset = (endByte + 1n).toString()
+      if (range) {
+        const parts = range.split('-')
+        if (parts[1]) {
+          nextOffset = (BigInt(parts[1]) + 1n).toString()
+        }
+      }
+      return res.json({ status: 'uploading', offset: nextOffset })
+    }
+
+    if (putRes && putRes.ok) {
       // Completed! Parse metadata
       const fileMeta = await putRes.json() as { id: string; name: string; mimeType: string }
 
@@ -635,13 +734,14 @@ uploadRouter.put('/resumable/chunk/:id', requireAuth, async (req: AuthRequest, r
       return res.status(201).json({ status: 'completed', file: { ...existingFile, sizeBytes: existingFile.sizeBytes.toString() } })
     }
 
-    const errorMsg = await putRes.text()
+    const errorMsg = putRes ? await putRes.text() : (lastNetworkError?.message || 'Upload chunk failed')
+    logUpload('chunk upload to google drive failed permanently', { sessionId: session.id, status: putRes?.status, errorMsg })
     await prisma.uploadSession.update({
       where: { id: session.id },
       data: { status: 'failed', errorMessage: errorMsg }
     })
 
-    return res.status(putRes.status).json({ code: 'UPLOAD_FAILED', message: errorMsg })
+    return res.status(putRes?.status || 500).json({ code: 'UPLOAD_FAILED', message: errorMsg })
   } catch (error) {
     return next(error)
   }

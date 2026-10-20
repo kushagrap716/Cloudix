@@ -134,9 +134,8 @@ export function TrashPage() {
 
       {message ? (
         <p
-          className={`mt-5 rounded-xl p-3 text-sm flex items-center gap-2 ${
-            messageType === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-          }`}
+          className={`mt-5 rounded-xl p-3 text-sm flex items-center gap-2 ${messageType === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+            }`}
         >
           {messageType === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
           {message}

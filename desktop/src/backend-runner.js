@@ -71,8 +71,53 @@ function loadOrCreateSecrets(secretsPath) {
   return secrets
 }
 
+function checkMigrationsUpToDate({ backendDir, env, logPath }) {
+  try {
+    if (!env.MARIADB_BASE_DIR || !env.DATABASE_URL) return false
+    const mariadbClient = path.join(env.MARIADB_BASE_DIR, 'bin', process.platform === 'win32' ? 'mariadb.exe' : 'mariadb')
+    const fallbackClient = path.join(env.MARIADB_BASE_DIR, 'bin', process.platform === 'win32' ? 'mysql.exe' : 'mysql')
+    const client = fs.existsSync(mariadbClient) ? mariadbClient : (fs.existsSync(fallbackClient) ? fallbackClient : null)
+    if (!client) return false
+
+    const migrationsDir = path.join(backendDir, 'prisma', 'migrations')
+    if (!fs.existsSync(migrationsDir)) return false
+    const dirs = fs.readdirSync(migrationsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort()
+    if (dirs.length === 0) return false
+    const latestMigration = dirs[dirs.length - 1]
+
+    const url = new URL(env.DATABASE_URL.replace('mysql://', 'http://'))
+    const port = url.port || '3306'
+    const user = url.username || 'root'
+    const password = decodeURIComponent(url.password || '')
+    const dbName = url.pathname.replace(/^\/+/, '') || 'cloudix'
+
+    const { spawnSync } = require('node:child_process')
+    const sql = `SELECT migration_name FROM _prisma_migrations WHERE rolled_back_at IS NULL AND migration_name = '${latestMigration}' LIMIT 1;`
+    const res = spawnSync(client, ['--no-defaults', '--protocol=TCP', '-h127.0.0.1', `-P${port}`, `-u${user}`, '-D', dbName, '-e', sql], {
+      env: { ...process.env, MYSQL_PWD: password },
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    })
+    if (res.status === 0 && res.stdout && res.stdout.includes(latestMigration)) {
+      appendLog(logPath, `\n[${new Date().toISOString()}] database is up to date (${latestMigration}); skipping prisma migrate deploy\n`)
+      return true
+    }
+  } catch {
+    /* fallback to normal prisma migrate deploy */
+  }
+  return false
+}
+
 /** Applies database migrations (same as `npx prisma migrate deploy`). */
 function runMigrations({ backendDir, env, logPath }) {
+  if (checkMigrationsUpToDate({ backendDir, env, logPath })) {
+    return Promise.resolve({ ok: true })
+  }
+
   return new Promise((resolve) => {
     const cli = path.join(backendDir, 'node_modules', 'prisma', 'build', 'index.js')
     if (!fs.existsSync(cli)) return resolve({ ok: false, error: `Prisma is missing from the app (${cli}).` })
@@ -174,7 +219,11 @@ async function killLeftoverBackend({ pidPath, port }) {
   }
   if (Number.isInteger(pid) && pid > 0 && (await pingHealth(`http://127.0.0.1:${port}/health`))) {
     try {
-      process.kill(pid)
+      if (process.platform === 'win32') {
+        require('node:child_process').spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true })
+      } else {
+        process.kill(pid)
+      }
     } catch {
       /* already gone */
     }

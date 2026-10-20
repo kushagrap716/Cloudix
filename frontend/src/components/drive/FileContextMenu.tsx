@@ -7,7 +7,7 @@ type Props = {
   file: FileItem | null
   onClose: () => void
   onView: () => void
-  onDownload: () => void
+  onDownload: (file?: FileItem | null) => void
   onRename: () => void
   onToggleStar: () => void
   onMove: () => void
@@ -36,7 +36,10 @@ function MenuItem({ icon: Icon, label, onClick, danger = false, kbd }: { icon: R
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
       className={[
         'group relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-semibold transition-all duration-150',
         danger
@@ -124,7 +127,7 @@ export function FileContextMenu({ x, y, file, onClose, onView, onDownload, onRen
         {/* Actions */}
         <div className="p-1.5">
           <MenuItem icon={Eye} label="Preview" onClick={onView} kbd="↵" />
-          <MenuItem icon={Download} label="Download" onClick={onDownload} />
+          <MenuItem icon={Download} label="Download" onClick={() => onDownload(file)} />
           <MenuItem icon={Star} label={file.starred ? 'Remove Star' : 'Add Star'} onClick={onToggleStar} />
           <MenuItem icon={Edit3} label="Rename" onClick={onRename} />
           <MenuItem icon={FolderInput} label="Move to Folder" onClick={onMove} />

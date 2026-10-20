@@ -43,7 +43,14 @@ for (const file of ['package.json', 'package-lock.json']) {
 
 // 3. Production dependencies + the Prisma client/engines for THIS operating system.
 run(fs.existsSync(path.join(target, 'package-lock.json')) ? 'npm ci --omit=dev' : 'npm install --omit=dev', target)
-run('npx --no-install prisma generate', target)
+if (fs.existsSync(path.join(backend, 'node_modules', '.prisma'))) {
+  fs.cpSync(path.join(backend, 'node_modules', '.prisma'), path.join(target, 'node_modules', '.prisma'), { recursive: true })
+}
+const generateRes = spawnSync('npx --no-install prisma generate', { cwd: target, stdio: 'inherit', shell: true, env: process.env })
+if (generateRes.status !== 0 && !fs.existsSync(path.join(target, 'node_modules', '.prisma', 'client'))) {
+  console.error('Command failed: npx --no-install prisma generate')
+  process.exit(generateRes.status || 1)
+}
 
 if (!fs.existsSync(path.join(target, 'node_modules', 'prisma', 'build', 'index.js'))) {
   console.error('The Prisma CLI is missing from backend-dist/node_modules. The app could not set up its database.')

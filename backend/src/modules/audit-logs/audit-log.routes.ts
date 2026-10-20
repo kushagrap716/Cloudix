@@ -16,3 +16,14 @@ auditLogRouter.get('/', requireAuth, async (req: AuthRequest, res, next) => {
     return next(error)
   }
 })
+
+auditLogRouter.delete('/', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    await prisma.auditLog.deleteMany({
+      where: { userId: req.user!.id }
+    })
+    return res.json({ status: 'ok' })
+  } catch (error) {
+    return next(error)
+  }
+})

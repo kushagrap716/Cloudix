@@ -113,7 +113,7 @@ input {
 /* Force layout transparency to let background gradients shine through */
 main,
 main.bg-white,
-main div.bg-white,
+main div.bg-white:not(.upload-progress-popup):not(.dummy-modal-content),
 main section.bg-white,
 section.min-w-0 {
   background: transparent !important;
@@ -121,7 +121,7 @@ section.min-w-0 {
 }
 
 /* Override solid bg-white on containers to keep glass effect */
-div.bg-white:not(button),
+div.bg-white:not(button):not(.upload-progress-popup):not(.dummy-modal-content),
 section.bg-white:not(button) {
   background-color: transparent !important;
 }
@@ -190,13 +190,111 @@ p, span, h1, h2, h3, h4, h5, h6, label, div, td, th {
 }
 
 /* Futuristic Glass Sidebar */
-aside {
+aside:not(.file-details-drawer) {
   background: var(--sidebar-bg) !important;
   backdrop-filter: blur(25px) saturate(180%);
   -webkit-backdrop-filter: blur(25px) saturate(180%);
   border-right: 1px solid var(--sidebar-border) !important;
   box-shadow: 4px 0 30px var(--shadow-color) !important;
   transition: background 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
+}
+
+/* Opaque Solid File Details Drawer */
+aside.file-details-drawer,
+html.dark aside.file-details-drawer,
+:root.dark aside.file-details-drawer {
+  background-color: #0f172a !important;
+  background: #0f172a !important;
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.75) !important;
+  z-index: 50 !important;
+}
+
+html.light aside.file-details-drawer,
+:root.light aside.file-details-drawer {
+  background-color: #ffffff !important;
+  background: #ffffff !important;
+  border-left: 1px solid #e2e8f0 !important;
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.15) !important;
+}
+
+aside.file-details-drawer .detail-row,
+html.dark aside.file-details-drawer .detail-row,
+:root.dark aside.file-details-drawer .detail-row {
+  background-color: #1e293b !important;
+  background: #1e293b !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+html.light aside.file-details-drawer .detail-row,
+:root.light aside.file-details-drawer .detail-row {
+  background-color: #f8fafc !important;
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+/* Opaque Solid Upload Progress Popup */
+.upload-progress-popup,
+div.upload-progress-popup,
+main div.upload-progress-popup,
+html.dark .upload-progress-popup,
+:root.dark .upload-progress-popup {
+  background-color: #0f172a !important;
+  background: #0f172a !important;
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8) !important;
+}
+
+html.light .upload-progress-popup,
+:root.light .upload-progress-popup,
+html.light main div.upload-progress-popup,
+:root.light main div.upload-progress-popup {
+  background-color: #ffffff !important;
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18) !important;
+}
+
+.upload-progress-popup .upload-progress-item,
+div.upload-progress-popup .upload-progress-item,
+html.dark .upload-progress-popup .upload-progress-item,
+:root.dark .upload-progress-popup .upload-progress-item {
+  background-color: #1e293b !important;
+  background: #1e293b !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+html.light .upload-progress-popup .upload-progress-item,
+:root.light .upload-progress-popup .upload-progress-item {
+  background-color: #f8fafc !important;
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+/* Opaque Solid Modals */
+.dummy-modal-content,
+div.dummy-modal-content,
+html.dark .dummy-modal-content,
+:root.dark .dummy-modal-content {
+  background-color: #0f172a !important;
+  background: #0f172a !important;
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+html.light .dummy-modal-content,
+:root.light .dummy-modal-content {
+  background-color: #ffffff !important;
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
 }
 
 /* Profile divider inside sidebar */

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent, type MouseEvent } from 'react'
 import { useDriveAutoSync, driveSyncState, type DriveSyncResult } from '@/lib/useDriveAutoSync'
 import { useSearchParams } from 'react-router-dom'
-import { Archive, CheckCircle, ClipboardPaste, Download, FolderInput, FolderPlus, LayoutGrid, List, RefreshCw, Star, Trash2, Upload, X } from 'lucide-react'
+import { Archive, CheckCircle, ClipboardPaste, Download, FolderInput, FolderPlus, LayoutGrid, List, RefreshCw, SlidersHorizontal, Star, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { DummyModal } from '@/components/drive/DummyModal'
@@ -16,6 +16,7 @@ import { defaultFolderColor, defaultFolderIconUrl, folderColorOptions, folderIco
 import { PageHeader } from '@/components/drive/PageHeader'
 import { Input } from '@/components/ui/input'
 import { API_URL, apiFetch, formatBytes, formatDate } from '@/lib/api'
+import { getAccessToken } from '@/lib/auth'
 import { createPlyr, ensurePlyr } from '@/lib/plyr'
 import { getPreviewKind, officeViewerUrl } from '@/lib/preview'
 import type { FileItem, FolderItem } from '@/data/drive-data'
@@ -83,6 +84,7 @@ export function AllFilesPage() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [folderOpen, setFolderOpen] = useState(false)
   const [starredOnly, setStarredOnly] = useState(false)
+  const [recentsOnly, setRecentsOnly] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [folderRenameOpen, setFolderRenameOpen] = useState(false)
   const [folderDeleteOpen, setFolderDeleteOpen] = useState(false)
@@ -138,6 +140,12 @@ export function AllFilesPage() {
   const { setHeaderActions } = useDriveLayoutActions()
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([])
   const [selectedTargetAccountId, setSelectedTargetAccountId] = useState('')
+  const [duplicateConflict, setDuplicateConflict] = useState<{
+    uploadingFiles: File[]
+    duplicateFiles: FileItem[]
+    targetFolderId: string | null
+    targetAccountId: string | null
+  } | null>(null)
 
   function changeFolderSize(scale: FolderSizeScale) {
     setFolderSizeScale(scale)
@@ -146,9 +154,10 @@ export function AllFilesPage() {
 
   async function loadFiles() {
     const params = new URLSearchParams()
-    if (activeFolderId) params.set('folderId', activeFolderId)
+    if (activeFolderId && !recentsOnly) params.set('folderId', activeFolderId)
     if (searchQuery) params.set('q', searchQuery)
     if (starredOnly) params.set('starred', 'true')
+    if (recentsOnly) params.set('recent', 'true')
 
     // Add advanced search filters
     const kind = searchParams.get('kind')
@@ -211,7 +220,7 @@ export function AllFilesPage() {
   useEffect(() => {
     loadAll().catch((error) => setMessage(error instanceof Error ? error.message : 'Failed to load files'))
     setSelectedFileIds(new Set())
-  }, [activeFolderId, searchQuery, starredOnly])
+  }, [searchParams, starredOnly, recentsOnly])
 
   useEffect(() => {
     async function loadConnectedAccounts() {
@@ -288,14 +297,51 @@ export function AllFilesPage() {
     setMessage('')
 
     const uploadingFiles = [...selectedFiles]
-    const targetFolderId = activeFolderId || selectedFolderId
+    const targetFolderId = activeFolderId || selectedFolderId || null
     const targetAccountId = selectedTargetAccountId || null
 
+    try {
+      // Check for duplicate files in the target folder
+      let existingInFolder = files.filter((f) => (f.folderId || null) === targetFolderId)
+      try {
+        const query = targetFolderId ? `/files?folderId=${targetFolderId}` : '/files'
+        const res = await apiFetch<{ files: BackendFile[] }>(query)
+        existingInFolder = res.files
+          .filter((f) => (f.folderId || null) === targetFolderId)
+          .map(mapFile)
+      } catch {
+        // Fall back to current files in state
+      }
+
+      const duplicates = existingInFolder.filter((ef) =>
+        uploadingFiles.some((uf) => uf.name.toLowerCase() === ef.name.toLowerCase())
+      )
+
+      if (duplicates.length > 0) {
+        setUploadOpen(false)
+        setDuplicateConflict({
+          uploadingFiles,
+          duplicateFiles: duplicates,
+          targetFolderId,
+          targetAccountId,
+        })
+        setLoading(false)
+        return
+      }
+
+      await proceedWithUpload(uploadingFiles, targetFolderId, targetAccountId)
+    } catch (err) {
+      console.error('Upload initiation failed:', err)
+      setMessage(err instanceof Error ? err.message : 'Upload failed')
+      setLoading(false)
+    }
+  }
+
+  async function proceedWithUpload(uploadingFiles: File[], targetFolderId: string | null, targetAccountId: string | null) {
     setSelectedFiles([])
     setSelectedFolderId('')
     setSelectedTargetAccountId('')
     setUploadOpen(false)
-
     try {
       await uploadFiles(uploadingFiles, targetFolderId, targetAccountId)
     } catch (err) {
@@ -305,14 +351,63 @@ export function AllFilesPage() {
     }
   }
 
-
-  async function syncGoogleDrive() {
-    if (driveSyncState.busy) return
-    driveSyncState.busy = true
-    setSyncingDrive(true)
+  async function handleConfirmReplace() {
+    if (!duplicateConflict) return
+    setLoading(true)
     setMessage('')
     try {
+      const { uploadingFiles, duplicateFiles, targetFolderId, targetAccountId } = duplicateConflict
+      const duplicateIds = duplicateFiles.map((f) => f.id).filter(Boolean) as string[]
+
+      if (duplicateIds.length > 0) {
+        await apiFetch('/files/batch', {
+          method: 'DELETE',
+          body: JSON.stringify({ fileIds: duplicateIds })
+        })
+        await apiFetch('/files/batch/permanent', {
+          method: 'DELETE',
+          body: JSON.stringify({ fileIds: duplicateIds })
+        }).catch(() => undefined)
+      }
+
+      setDuplicateConflict(null)
+      await proceedWithUpload(uploadingFiles, targetFolderId, targetAccountId)
+      await loadFiles()
+    } catch (err) {
+      console.error('Failed to replace file:', err)
+      setMessage(err instanceof Error ? err.message : 'Failed to replace existing file')
+      setLoading(false)
+    }
+  }
+
+  function handleCancelReplace() {
+    setDuplicateConflict(null)
+    setSelectedFiles([])
+    setSelectedFolderId('')
+    setSelectedTargetAccountId('')
+    setLoading(false)
+  }
+
+
+  async function syncGoogleDrive() {
+    if (driveSyncState.busy) {
+      if (Date.now() - driveSyncState.lastRunAt < 15_000) {
+        setMessage('Google Drive sync is already in progress, please wait a moment...')
+        return
+      }
+      driveSyncState.busy = false
+    }
+    driveSyncState.busy = true
+    driveSyncState.lastRunAt = Date.now()
+    setSyncingDrive(true)
+    setMessage('Syncing with Google Drive...')
+    try {
       const response = await apiFetch<{ results: DriveSyncResult[]; errors?: { message: string }[] }>('/files/sync-google', { method: 'POST', body: JSON.stringify({}) })
+
+      if (!response.results || response.results.length === 0) {
+        setMessage('No connected Google Drive accounts found. Please connect your Google Drive in Settings or Quota Tracker.')
+        return
+      }
 
       let created = 0, updated = 0, deleted = 0, foldersChanged = 0
       for (const res of response.results) {
@@ -432,40 +527,65 @@ export function AllFilesPage() {
     }
   }
 
-  async function downloadFile() {
-    if (!activeFile?.id) return
-    const response = await fetch(`${API_URL}/files/${activeFile.id}/download`)
-    if (!response.ok) throw new Error('Download failed')
-    const blob = await response.blob()
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = activeFile.name
-    link.click()
-    URL.revokeObjectURL(url)
+  async function downloadFile(fileToDownload?: any) {
+    const candidate = fileToDownload && typeof fileToDownload === 'object' && 'id' in fileToDownload && typeof fileToDownload.id === 'string'
+      ? (fileToDownload as FileItem)
+      : null
+    const target = candidate || contextMenu.file || activeFile
     setContextMenu({ x: 0, y: 0, file: null })
+    if (!target?.id) return
+    setMessage(`Downloading ${target.name}...`)
+    try {
+      const token = getAccessToken()
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+      const response = await fetch(`${API_URL}/files/${target.id}/download`, { headers })
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => null)
+        throw new Error(errJson?.message || 'Download failed')
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = target.name
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      setMessage(`Downloaded ${target.name}`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Download failed')
+    }
   }
 
   async function downloadBatchAsZip() {
     const selectedIds = [...selectedFileIds]
     if (selectedIds.length === 0) return
     setLoading(true)
-    setMessage('')
+    setMessage('Preparing ZIP download...')
     try {
+      const token = getAccessToken()
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      }
       const response = await fetch(`${API_URL}/files/batch-download`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers,
         body: JSON.stringify({ fileIds: selectedIds })
       })
-      if (!response.ok) throw new Error('Failed to download ZIP file')
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => null)
+        throw new Error(errJson?.message || 'Failed to download ZIP file')
+      }
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
       link.download = 'cloudix-download.zip'
+      document.body.appendChild(link)
       link.click()
+      link.remove()
       URL.revokeObjectURL(url)
       clearSelection()
       setMessage('Batch download complete.')
@@ -481,14 +601,21 @@ export function AllFilesPage() {
     try {
       setLoading(true)
       setMessage(`Preparing ZIP for ${folder.name}...`)
-      const response = await fetch(`${API_URL}/folders/${folder.id}/download`)
-      if (!response.ok) throw new Error('Failed to download folder as ZIP')
+      const token = getAccessToken()
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+      const response = await fetch(`${API_URL}/folders/${folder.id}/download`, { headers })
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => null)
+        throw new Error(errJson?.message || 'Failed to download folder as ZIP')
+      }
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
       link.download = `${folder.name}.zip`
+      document.body.appendChild(link)
       link.click()
+      link.remove()
       URL.revokeObjectURL(url)
       setMessage(`Downloaded ${folder.name}.zip`)
     } catch (error) {
@@ -701,12 +828,13 @@ export function AllFilesPage() {
         <Button size="sm" variant="outline" onClick={() => setFolderOpen(true)}>
           <FolderPlus className="h-3.5 w-3.5" />New Folder
         </Button>
-        <Button size="sm" variant="outline" disabled={syncingDrive} onClick={syncGoogleDrive}>
+        <Button size="sm" variant="outline" disabled={syncingDrive} onClick={() => void syncGoogleDrive()}>
           <RefreshCw className={syncingDrive ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
           {syncingDrive ? 'Syncing...' : 'Sync'}
         </Button>
       </div>
     )
+    return () => setHeaderActions(null)
   }, [syncingDrive, folderSizeScale])
 
 
@@ -729,6 +857,15 @@ export function AllFilesPage() {
   const allVisibleSelected = files.length > 0 && files.every((file) => file.id && selectedFileIds.has(file.id))
   const activePreviewKind = getPreviewKind(activeFile?.mimeType)
 
+  const hasAdvancedFilters = Boolean(
+    searchParams.get('kind') ||
+    searchParams.get('accountId') ||
+    searchParams.get('minSize') ||
+    searchParams.get('maxSize') ||
+    searchParams.get('startDate') ||
+    searchParams.get('endDate')
+  )
+
   return (
     <>
       <div onContextMenu={openEmptyContextMenu} className="min-h-[620px] w-full min-w-0">
@@ -744,6 +881,53 @@ export function AllFilesPage() {
           ))}
         </div>
       </div>
+      {hasAdvancedFilters && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-blue-50/80 p-2.5 text-xs text-blue-900 border border-blue-200 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-200">
+          <SlidersHorizontal className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+          <span className="font-bold">Active Filters:</span>
+          {searchParams.get('kind') && (
+            <span className="rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 shadow-sm border border-blue-100 dark:border-blue-900">
+              Type: {searchParams.get('kind')}
+            </span>
+          )}
+          {searchParams.get('accountId') && (
+            <span className="rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 shadow-sm border border-blue-100 dark:border-blue-900">
+              Account: {connectedAccounts.find((a) => a.id === searchParams.get('accountId'))?.email || 'Selected'}
+            </span>
+          )}
+          {searchParams.get('minSize') && (
+            <span className="rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 shadow-sm border border-blue-100 dark:border-blue-900">
+              Min: {Math.round(Number(searchParams.get('minSize')) / (1024 * 1024))}MB
+            </span>
+          )}
+          {searchParams.get('maxSize') && (
+            <span className="rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 shadow-sm border border-blue-100 dark:border-blue-900">
+              Max: {Math.round(Number(searchParams.get('maxSize')) / (1024 * 1024))}MB
+            </span>
+          )}
+          {searchParams.get('startDate') && (
+            <span className="rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 shadow-sm border border-blue-100 dark:border-blue-900">
+              From: {searchParams.get('startDate')!.split('T')[0]}
+            </span>
+          )}
+          {searchParams.get('endDate') && (
+            <span className="rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 shadow-sm border border-blue-100 dark:border-blue-900">
+              To: {searchParams.get('endDate')!.split('T')[0]}
+            </span>
+          )}
+          <button
+            onClick={() => {
+              const next = new URLSearchParams()
+              if (activeFolderId) next.set('folderId', activeFolderId)
+              if (searchQuery) next.set('q', searchQuery)
+              setSearchParams(next)
+            }}
+            className="ml-auto font-bold text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline cursor-pointer"
+          >
+            Clear All Filters
+          </button>
+        </div>
+      )}
       {message ? <p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm text-blue-700">{message}</p> : null}
       {!activeFolder && (recentFolders.length > 0 ? <FolderGrid items={recentFolders} mobileTwoColumns sizeScale={folderSizeScale} onFolderMenu={openFolderMenu} onFolderOpen={openFolder} onDropItem={handleDropItem} /> : <p className="mt-4 rounded-xl bg-slate-50 p-5 text-sm text-slate-500">No folders yet. Click New Folder to organize uploads.</p>)}
       {!activeFolder && moreFolders.length > 0 ? <>
@@ -755,7 +939,7 @@ export function AllFilesPage() {
         <FolderGrid items={folders} sizeScale={folderSizeScale} onFolderMenu={openFolderMenu} onFolderOpen={openFolder} onDropItem={handleDropItem} />
       </> : null}
       <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-3"><Button variant="soft" className="hidden sm:inline-flex"><Archive className="h-4 w-4" />Recents</Button><Button variant={starredOnly ? 'default' : 'soft'} className="hidden sm:inline-flex" onClick={() => setStarredOnly((value) => !value)} aria-pressed={starredOnly}><Star className={starredOnly ? 'h-4 w-4 fill-yellow-300' : 'h-4 w-4'} />Starred</Button>{selectedFileIds.size > 0 ? <div className="flex w-full flex-col gap-3 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-3 sm:w-auto sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0"><span className="text-sm font-extrabold text-slate-700">{selectedFileIds.size} selected</span><div className="grid grid-cols-4 gap-2 sm:flex sm:gap-3"><Button className="w-full" variant="outline" onClick={downloadBatchAsZip}><Download className="h-4 w-4" />ZIP</Button><Button className="w-full" variant="outline" onClick={() => setMoveOpen(true)}><FolderInput className="h-4 w-4" />Move</Button><Button className="w-full" variant="danger" onClick={() => setDeleteOpen(true)}><Trash2 className="h-4 w-4" />Delete</Button><Button className="w-full" variant="ghost" onClick={clearSelection}>Clear</Button></div></div> : null}</div>
+        <div className="flex flex-wrap items-center gap-3"><Button variant={recentsOnly ? 'default' : 'soft'} className="hidden sm:inline-flex" onClick={() => { setRecentsOnly((value) => !value); if (!recentsOnly) setStarredOnly(false) }} aria-pressed={recentsOnly}><Archive className="h-4 w-4" />Recents</Button><Button variant={starredOnly ? 'default' : 'soft'} className="hidden sm:inline-flex" onClick={() => { setStarredOnly((value) => !value); if (!starredOnly) setRecentsOnly(false) }} aria-pressed={starredOnly}><Star className={starredOnly ? 'h-4 w-4 fill-yellow-300' : 'h-4 w-4'} />Starred</Button>{selectedFileIds.size > 0 ? <div className="flex w-full flex-col gap-3 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-3 sm:w-auto sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0"><span className="text-sm font-extrabold text-slate-700">{selectedFileIds.size} selected</span><div className="grid grid-cols-4 gap-2 sm:flex sm:gap-3"><Button className="w-full" variant="outline" onClick={downloadBatchAsZip}><Download className="h-4 w-4" />ZIP</Button><Button className="w-full" variant="outline" onClick={() => setMoveOpen(true)}><FolderInput className="h-4 w-4" />Move</Button><Button className="w-full" variant="danger" onClick={() => setDeleteOpen(true)}><Trash2 className="h-4 w-4" />Delete</Button><Button className="w-full" variant="ghost" onClick={clearSelection}>Clear</Button></div></div> : null}</div>
         <div className="flex gap-3"><Button variant={fileViewMode === 'grid' ? 'soft' : 'outline'} size="icon" aria-label="Show files as grid" aria-pressed={fileViewMode === 'grid'} onClick={() => changeFileViewMode('grid')}><LayoutGrid className="h-5 w-5" /></Button><Button variant={fileViewMode === 'list' ? 'soft' : 'outline'} size="icon" aria-label="Show files as list" aria-pressed={fileViewMode === 'list'} onClick={() => changeFileViewMode('list')}><List className="h-5 w-5" /></Button></div>
       </div>
       {cutFolder ? <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-700"><ClipboardPaste className="mr-2 inline h-4 w-4" />Cut folder: {cutFolder.name}. Press Ctrl+V or right-click empty area to paste here.</p> : null}
@@ -774,7 +958,7 @@ export function AllFilesPage() {
       )}
       </div>
       <EmptyAreaContextMenu x={emptyContextMenu.x} y={emptyContextMenu.y} open={emptyContextMenu.open} canPasteFolder={Boolean(cutFolder)} onClose={() => setEmptyContextMenu({ x: 0, y: 0, open: false })} onUpload={() => { setUploadOpen(true); setEmptyContextMenu({ x: 0, y: 0, open: false }) }} onCreateFolder={() => { setFolderOpen(true); setEmptyContextMenu({ x: 0, y: 0, open: false }) }} onPasteFolder={() => { pasteFolder().catch((error) => setMessage(error instanceof Error ? error.message : 'Failed to paste folder')); setEmptyContextMenu({ x: 0, y: 0, open: false }) }} />
-      <FileContextMenu x={contextMenu.x} y={contextMenu.y} file={contextMenu.file} onClose={() => setContextMenu({ x: 0, y: 0, file: null })} onView={viewFile} onDownload={downloadFile} onToggleStar={toggleStar} onRename={() => { setRenameValue(activeFile?.name ?? ''); setRenameOpen(true); setContextMenu({ x: 0, y: 0, file: null }) }} onMove={() => { setMoveOpen(true); setContextMenu({ x: 0, y: 0, file: null }) }} onDetails={() => { setDetailOpen(true); setContextMenu({ x: 0, y: 0, file: null }) }} onShare={shareFile} onCopyLink={copyShareLinkDirect} onInvite={inviteToFile} onDelete={() => { setDeleteOpen(true); setContextMenu({ x: 0, y: 0, file: null }) }} />
+      <FileContextMenu x={contextMenu.x} y={contextMenu.y} file={contextMenu.file} onClose={() => setContextMenu({ x: 0, y: 0, file: null })} onView={viewFile} onDownload={(f) => void downloadFile(f || contextMenu.file || activeFile)} onToggleStar={toggleStar} onRename={() => { setRenameValue(activeFile?.name ?? ''); setRenameOpen(true); setContextMenu({ x: 0, y: 0, file: null }) }} onMove={() => { setMoveOpen(true); setContextMenu({ x: 0, y: 0, file: null }) }} onDetails={() => { setDetailOpen(true); setContextMenu({ x: 0, y: 0, file: null }) }} onShare={shareFile} onCopyLink={copyShareLinkDirect} onInvite={inviteToFile} onDelete={() => { setDeleteOpen(true); setContextMenu({ x: 0, y: 0, file: null }) }} />
       <FolderContextMenu
         x={folderContextMenu.x}
         y={folderContextMenu.y}
@@ -796,7 +980,7 @@ export function AllFilesPage() {
           setFolderContextMenu({ x: 0, y: 0, folder: null })
         }}
       />
-      <FileDetailsDrawer open={detailOpen} file={activeFile} onClose={() => setDetailOpen(false)} />
+      <FileDetailsDrawer open={detailOpen} file={activeFile} onClose={() => setDetailOpen(false)} onDownload={() => void downloadFile(activeFile)} />
 
       <DummyModal open={uploadOpen} title="Upload File" description="Stream file directly to selected Google Drive account." onClose={() => setUploadOpen(false)}>
         <form onSubmit={uploadFile} className="grid gap-4">
@@ -825,6 +1009,45 @@ export function AllFilesPage() {
           {selectedFiles.length > 0 ? <div className="grid max-h-56 gap-2 overflow-y-auto rounded-xl bg-slate-50 p-3 text-sm text-slate-600"><div className="flex items-center justify-between gap-3"><span className="font-bold text-slate-950">{selectedFiles.length} selected</span><span className="shrink-0">{formatBytes(selectedFiles.reduce((total, file) => total + file.size, 0))}</span></div>{selectedFiles.map((file, index) => <div key={`${file.name}-${file.size}-${index}`} className="flex min-w-0 items-center justify-between gap-3 rounded-lg bg-white px-3 py-2"><span className="min-w-0 flex-1 truncate" title={file.name}>{file.name}</span><span className="shrink-0 text-xs text-slate-500">{formatBytes(file.size)}</span><button type="button" className="shrink-0 text-slate-500 hover:text-red-600" onClick={() => removeUploadFile(index)} aria-label={`Remove ${file.name}`}><X className="h-4 w-4" /></button></div>)}</div> : null}
           <div className="grid gap-3 sm:flex sm:justify-end"><Button type="button" variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button><Button disabled={loading || selectedFiles.length === 0}>{loading ? 'Uploading...' : `Upload${selectedFiles.length > 1 ? ` ${selectedFiles.length} files` : ''}`}</Button></div>
         </form>
+      </DummyModal>
+      <DummyModal
+        open={Boolean(duplicateConflict)}
+        title="File Already Exists"
+        description="A file with this name already exists in this folder."
+        onClose={handleCancelReplace}
+      >
+        <div className="grid gap-4">
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
+            <p className="font-semibold">
+              {duplicateConflict && duplicateConflict.duplicateFiles.length === 1
+                ? `"${duplicateConflict.duplicateFiles[0].name}" already exists in this location.`
+                : `${duplicateConflict?.duplicateFiles.length} files already exist in this location:`}
+            </p>
+            {duplicateConflict && duplicateConflict.duplicateFiles.length > 1 && (
+              <ul className="mt-2 list-disc list-inside space-y-1 text-xs">
+                {duplicateConflict.duplicateFiles.map((f) => (
+                  <li key={f.id} className="font-medium truncate">{f.name}</li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">
+              Replacing will delete the existing file{duplicateConflict && duplicateConflict.duplicateFiles.length > 1 ? 's' : ''} and upload the new version.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3 pt-1">
+            <Button type="button" variant="outline" onClick={handleCancelReplace}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={handleConfirmReplace}
+              disabled={loading}
+            >
+              {loading ? 'Replacing...' : 'Replace'}
+            </Button>
+          </div>
+        </div>
       </DummyModal>
        <DummyModal open={folderOpen} title="New Folder" description="Create a virtual folder for organizing files." onClose={() => setFolderOpen(false)}>
         <form onSubmit={createFolder} className="grid gap-4">
@@ -903,7 +1126,22 @@ export function AllFilesPage() {
           {!previewLoading && !previewError && activePreviewKind === 'video' && previewUrl ? <div className="shared-video-shell"><video ref={previewVideoRef} controls playsInline preload="metadata" onError={() => setPreviewError('Failed to load preview.')}><source src={previewUrl} type={activeFile?.mimeType} /></video></div> : null}
           {!previewLoading && !previewError && activePreviewKind === 'document' && previewUrl ? <iframe src={previewUrl} title={activeFile?.name ?? 'File preview'} className="h-full w-full border-0 bg-white" /> : null}
           {!previewLoading && !previewError && activePreviewKind === 'office' && previewUrl ? <iframe src={officeViewerUrl(previewUrl)} title={activeFile?.name ?? 'File preview'} className="h-full w-full border-0 bg-white" /> : null}
-          {!previewLoading && !previewError && !activePreviewKind ? <div className="p-6 text-center text-sm text-slate-500">Preview not available for this file type. Use Download instead.</div> : null}
+          {!previewLoading && !previewError && !activePreviewKind ? (
+            <div className="p-6 text-center text-sm text-slate-500 flex flex-col items-center gap-3">
+              <p>Preview not available for this file type.</p>
+              <Button onClick={() => void downloadFile(activeFile)}>
+                <Download className="h-4 w-4" />Download File
+              </Button>
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+            {activeFile?.sizeBytes ? formatBytes(activeFile.sizeBytes) : ''}
+          </p>
+          <Button variant="outline" size="sm" onClick={() => void downloadFile(activeFile)}>
+            <Download className="h-4 w-4" />Download File
+          </Button>
         </div>
       </DummyModal>
     </>

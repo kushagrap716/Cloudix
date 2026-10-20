@@ -12,7 +12,9 @@ import {
   Move
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/drive/PageHeader'
+import { DummyModal } from '@/components/drive/DummyModal'
 import { apiFetch, formatDate } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -29,6 +31,8 @@ export function ActivityLogPage() {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+  const [clearing, setClearing] = useState(false)
 
   async function loadLogs() {
     setLoading(true)
@@ -46,6 +50,21 @@ export function ActivityLogPage() {
   useEffect(() => {
     loadLogs().catch(() => undefined)
   }, [])
+
+  async function handleClearActivity() {
+    setClearing(true)
+    setError('')
+    try {
+      await apiFetch('/audit-logs', { method: 'DELETE' })
+      setLogs([])
+      setConfirmClearOpen(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear activity logs')
+      setConfirmClearOpen(false)
+    } finally {
+      setClearing(false)
+    }
+  }
 
   function getActionBadge(action: string) {
     const act = action.toUpperCase()
@@ -137,6 +156,16 @@ export function ActivityLogPage() {
       <PageHeader
         title="Activity Log"
         description="View audit trails and file activities in your Cloudix workspace."
+        actions={
+          <Button
+            variant="danger"
+            onClick={() => setConfirmClearOpen(true)}
+            disabled={clearing || logs.length === 0}
+          >
+            <Trash2 className="h-4 w-4" />
+            Clear Activity
+          </Button>
+        }
       />
 
       {error && (
@@ -203,6 +232,32 @@ export function ActivityLogPage() {
           )}
         </div>
       </Card>
+
+      <DummyModal
+        open={confirmClearOpen}
+        title="Clear All Activity"
+        description="Are you sure you want to clear all activity logs? This action cannot be undone."
+        onClose={() => setConfirmClearOpen(false)}
+      >
+        <div className="flex justify-end gap-3 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setConfirmClearOpen(false)}
+            disabled={clearing}
+          >
+            No
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={handleClearActivity}
+            disabled={clearing}
+          >
+            {clearing ? 'Clearing...' : 'Yes, Clear All'}
+          </Button>
+        </div>
+      </DummyModal>
     </>
   )
 }

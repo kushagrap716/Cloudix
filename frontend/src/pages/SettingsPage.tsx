@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { DummyModal } from '@/components/drive/DummyModal'
 import { PageHeader } from '@/components/drive/PageHeader'
 import { apiFetch, formatBytes, API_URL } from '@/lib/api'
-import { clearSession } from '@/lib/auth'
+import { clearSession, getAccessToken } from '@/lib/auth'
 import { getGravatarUrl } from '@/lib/gravatar'
 
 type ConnectedAccount = { id: string; provider: string; email: string; displayName?: string | null; status: string; storageAccount?: { totalBytes: string | null; usedBytes: string; availableBytes: string | null; lastSyncedAt: string | null } | null }
@@ -84,7 +84,9 @@ export function SettingsPage() {
   async function downloadBackup() {
     setDownloadingBackup(true)
     try {
+      const token = getAccessToken()
       const response = await fetch(`${API_URL}/system/backup`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       })
       if (!response.ok) {
         const data = await response.json().catch(() => null)
@@ -128,8 +130,10 @@ export function SettingsPage() {
       const formData = new FormData()
       formData.append('file', restoreFile)
 
+      const token = getAccessToken()
       const response = await fetch(`${API_URL}/system/restore`, {
         method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData
       })
 
